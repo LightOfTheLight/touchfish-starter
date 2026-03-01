@@ -128,6 +128,9 @@ jobs:
     needs: [parse-trigger, run-agent]
     if: needs.parse-trigger.outputs.should_run == 'true' && needs.run-agent.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
