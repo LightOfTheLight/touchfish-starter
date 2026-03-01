@@ -2,39 +2,99 @@
 
 ## 1. Overview
 
-**Project Name:** *Your Project Name*
-**Project Type:** *Your project type*
-**Target Users:** *Your target users*
+**Project Name:** Google Dinosaur Web Game
+**Project Type:** Browser-based Web Game
+**Target Users:** General web users on desktop and mobile browsers
 
 ### 1.1 Vision
 
-*Describe your project vision here. What problem does it solve? What is the end goal?*
+A faithful recreation of the Google Chrome offline dinosaur runner game, playable in any modern browser. The game provides an engaging endless runner experience with increasing difficulty, visual variety through a day/night cycle, and persistent high score tracking.
 
 ### 1.2 Core Principles
 
-- *Principle 1*
-- *Principle 2*
-- *Principle 3*
+- **Simplicity:** Vanilla HTML/CSS/JS only — no external frameworks or libraries
+- **Accessibility:** Works on both desktop (keyboard) and mobile (touch) devices
+- **Fidelity:** Core gameplay mechanics mirror the Chrome dinosaur game experience
 
 ---
 
 ## 2. Functional Requirements
 
-### 2.1 Feature 1
+### 2.1 Dinosaur Character
 
-**Description:** *What should this feature do?*
-
-**Acceptance Criteria:**
-- [ ] *Criteria 1*
-- [ ] *Criteria 2*
-
-### 2.2 Feature 2
-
-**Description:** *What should this feature do?*
+**Description:** The player controls a dinosaur that runs automatically from left to right. The player can make it jump or duck to avoid obstacles.
 
 **Acceptance Criteria:**
-- [ ] *Criteria 1*
-- [ ] *Criteria 2*
+- [ ] Dinosaur runs continuously with a running animation (alternating legs)
+- [ ] Pressing Space or Up Arrow causes the dinosaur to jump
+- [ ] Pressing Down Arrow causes the dinosaur to duck (crouch lower)
+- [ ] Tapping the screen causes the dinosaur to jump (mobile)
+- [ ] Swiping down on the screen causes the dinosaur to duck (mobile)
+- [ ] Jump and duck animations are visually distinct from the running animation
+- [ ] Dinosaur cannot jump again while already in the air
+
+### 2.2 Obstacles
+
+**Description:** Randomly generated obstacles appear from the right side of the screen and move left. The player must avoid them.
+
+**Acceptance Criteria:**
+- [ ] Cacti obstacles appear in at least 2 different sizes/variants
+- [ ] Cacti can appear in groups (e.g., 1–3 cacti side by side)
+- [ ] Flying pterodactyl (bird) obstacles appear at varying heights
+- [ ] Obstacle spawn timing is randomized within a defined interval range
+- [ ] Obstacles move from right to left at the current game speed
+- [ ] Collision with any obstacle triggers game over
+
+### 2.3 Scoring
+
+**Description:** The player's score increases as they survive longer. The score and high score are displayed on screen.
+
+**Acceptance Criteria:**
+- [ ] Score increments continuously while the game is running
+- [ ] Current score is displayed prominently on screen
+- [ ] High score is displayed alongside the current score
+- [ ] High score persists across browser sessions via localStorage
+- [ ] High score is updated immediately when the current score exceeds it
+
+### 2.4 Difficulty Progression
+
+**Description:** The game becomes harder over time by increasing the speed of the dinosaur and obstacles.
+
+**Acceptance Criteria:**
+- [ ] Game speed starts at a defined initial value
+- [ ] Game speed gradually increases as the score increases
+- [ ] Speed increase is capped at a maximum value to keep the game playable
+- [ ] Obstacle spawn frequency may also increase with speed
+
+### 2.5 Day/Night Cycle
+
+**Description:** The game's visual theme alternates between a light (day) mode and a dark (night) mode at regular intervals.
+
+**Acceptance Criteria:**
+- [ ] Game starts in day mode (light background)
+- [ ] Game transitions to night mode (dark background) after a defined score threshold
+- [ ] Transitions alternate between day and night periodically
+- [ ] All game elements (dinosaur, obstacles, ground) remain visible in both modes
+
+### 2.6 Game Over & Restart
+
+**Description:** When the dinosaur collides with an obstacle, the game ends and the player is offered the option to restart.
+
+**Acceptance Criteria:**
+- [ ] Game pauses immediately upon collision
+- [ ] A "Game Over" message is displayed
+- [ ] A restart prompt (e.g., press Space or tap screen) is shown
+- [ ] Pressing Space, Up Arrow, or tapping the screen restarts the game
+- [ ] Score resets to 0 on restart; high score is preserved
+
+### 2.7 Start Screen
+
+**Description:** Before the first game begins, the game is in a waiting state until the player initiates it.
+
+**Acceptance Criteria:**
+- [ ] Game does not start automatically on page load
+- [ ] A prompt instructs the player how to start (e.g., "Press Space to Start")
+- [ ] Game begins on the first valid input (Space, Up Arrow, or tap)
 
 ---
 
@@ -44,37 +104,69 @@
 
 | Component | Technology |
 |-----------|------------|
-| Language | *e.g., TypeScript, Python* |
-| Framework | *e.g., Next.js, FastAPI* |
-| Database | *e.g., PostgreSQL, SQLite* |
+| Markup | HTML5 |
+| Styling | CSS3 |
+| Logic | Vanilla JavaScript (ES6+) |
+| Storage | Browser localStorage |
+| Rendering | Canvas API or DOM elements |
 
 ### 3.2 Constraints
 
-- *Any technical constraints or requirements*
+- No external JavaScript frameworks (e.g., no React, Vue, jQuery)
+- No external CSS frameworks (e.g., no Bootstrap, Tailwind)
+- Must run entirely in the browser with no server-side component
+- Single-file or minimal file structure preferred for simplicity
+
+### 3.3 Browser Compatibility
+
+- Must support modern browsers: Chrome, Firefox, Safari, Edge (latest versions)
+- Mobile browsers: iOS Safari, Android Chrome
 
 ---
 
 ## 4. Non-Functional Requirements
 
 ### 4.1 Performance
-- *Performance requirements*
+- Game loop must run at a stable 60 FPS on modern hardware
+- No significant frame drops during normal gameplay
 
-### 4.2 Security
-- *Security requirements*
+### 4.2 Responsiveness
+- Game canvas/viewport scales appropriately for common screen sizes
+- Playable on screens as small as 320px width
+
+### 4.3 Usability
+- Controls must be intuitive with no learning curve for anyone familiar with the Chrome dino game
+- Touch targets must be large enough for mobile use
 
 ---
 
 ## 5. Acceptance Criteria
 
 ### 5.1 MVP
-- [ ] *MVP criterion 1*
-- [ ] *MVP criterion 2*
+- [ ] Dinosaur character visible and animating on screen
+- [ ] Player can jump over obstacles using keyboard
+- [ ] Cactus obstacles spawn and move across the screen
+- [ ] Collision detection works correctly
+- [ ] Score increments during gameplay
+- [ ] Game over screen appears on collision
+- [ ] Player can restart the game
+- [ ] High score saved to localStorage
 
-### 5.2 Future Enhancements
-- *Enhancement 1*
-- *Enhancement 2*
+### 5.2 Full Feature Set
+- [ ] All MVP criteria met
+- [ ] Duck mechanic implemented
+- [ ] Pterodactyl (bird) obstacles implemented
+- [ ] Day/night cycle implemented
+- [ ] Touch controls for mobile implemented
+- [ ] Responsive layout for mobile screens
+
+### 5.3 Future Enhancements
+- Sound effects (jump, collision, milestone score)
+- Achievement system
+- Multiple difficulty settings
+- Leaderboard (requires backend)
 
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: —*
+*Last updated: 2026-03-01*
