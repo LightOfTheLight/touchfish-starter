@@ -168,5 +168,68 @@ A faithful recreation of the Google Chrome offline dinosaur runner game, playabl
 
 ---
 
+## 6. Implementation Guidance for DEV
+
+This section provides recommended defaults to resolve open mechanical parameters left by the requirements. These are starting values — DEV may tune them based on playtesting.
+
+### 6.1 Game Loop & Rendering
+
+- **Target frame rate:** 60 FPS via `requestAnimationFrame`
+- **Canvas size:** 800×300px (scales down for smaller screens)
+- **Ground line:** ~260px from top of canvas (bottom ~40px reserved for ground)
+
+### 6.2 Dinosaur
+
+| Parameter | Suggested Value |
+|-----------|----------------|
+| Sprite width | ~44px |
+| Sprite height | ~48px |
+| Jump velocity | −15 to −18 px/frame |
+| Gravity | +0.8 to +1.0 px/frame² |
+| Duck height reduction | ~50% of standing height |
+| Hitbox | Slightly smaller than sprite (forgiving collision) |
+
+### 6.3 Obstacles
+
+| Parameter | Suggested Value |
+|-----------|----------------|
+| Min spawn interval | 800ms |
+| Max spawn interval | 2000ms (decreases as speed increases) |
+| Small cactus | ~20×40px |
+| Large cactus | ~25×50px |
+| Group size | 1–3 cacti |
+| Pterodactyl heights | 3 levels: ground+20px, mid (100px), high (150px) |
+
+### 6.4 Speed & Difficulty
+
+| Parameter | Suggested Value |
+|-----------|----------------|
+| Initial speed | 5 px/frame |
+| Speed increment | +0.001 per frame |
+| Maximum speed | 12–13 px/frame |
+| Day/night cycle threshold | Every 700 score points |
+
+### 6.5 Scoring
+
+- Score increments by 1 every ~6 frames at normal speed (approx. 0.1 pts/frame at 60fps)
+- Display format: leading zeros to 5 digits (e.g., `00123`)
+
+### 6.6 File Structure
+
+Preferred minimal structure:
+```
+index.html       ← game markup + embedded CSS + JS (single file acceptable)
+```
+Or split as:
+```
+index.html
+style.css
+game.js
+```
+
+Both approaches are acceptable per constraint 3.2.
+
+---
+
 *Document maintained by: PO Agent*
 *Last updated: 2026-03-01*
