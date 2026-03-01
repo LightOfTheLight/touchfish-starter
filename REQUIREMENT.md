@@ -168,5 +168,94 @@ A faithful recreation of the Google Chrome offline dinosaur runner game, playabl
 
 ---
 
+## 6. Implementation Guide
+
+### 6.1 Game Configuration Constants
+
+These values serve as recommended starting points. DEV may adjust based on playtesting, but must not deviate substantially without documenting the rationale.
+
+| Constant | Recommended Value | Notes |
+|----------|------------------|-------|
+| Canvas width | 800px | Scales on smaller screens |
+| Canvas height | 300px | Fixed height |
+| Initial game speed | 5 px/frame | Pixels moved per frame at 60 FPS |
+| Max game speed | 15 px/frame | Speed cap to keep game playable |
+| Speed increment | +0.001 per frame | Gradual increase |
+| Gravity | 0.6 px/frame² | Applied to dinosaur vertical velocity |
+| Jump velocity | -12 px/frame | Upward impulse on jump |
+| Ground level | 220px (from top) | Y coordinate of ground surface |
+| Obstacle spawn interval (min) | 60 frames | ~1 second at 60 FPS |
+| Obstacle spawn interval (max) | 150 frames | ~2.5 seconds at 60 FPS |
+| Day/night toggle score | Every 500 points | Cycle threshold |
+| Score increment rate | +1 per 6 frames | Score ticks at ~10 per second |
+
+### 6.2 Suggested File Structure
+
+```
+/
+├── index.html          # Single entry point (HTML + embedded CSS + JS preferred)
+├── README.md           # User requirements (do not modify)
+└── REQUIREMENT.md      # This file (PO-owned)
+```
+
+Alternatively, if DEV chooses a multi-file structure:
+
+```
+/
+├── index.html
+├── style.css
+├── game.js
+├── README.md
+└── REQUIREMENT.md
+```
+
+### 6.3 Implementation Phases
+
+The DEV agent should implement in the following order to deliver working increments:
+
+**Phase 1 — MVP Core (matches 5.1)**
+1. Set up canvas and game loop (requestAnimationFrame at 60 FPS)
+2. Draw and animate the dinosaur (running animation, ground placement)
+3. Implement jump mechanic with gravity (Space/Up Arrow)
+4. Spawn and animate cactus obstacles (at least 2 variants)
+5. Collision detection (dinosaur vs obstacle bounding box)
+6. Score counter (incrementing display)
+7. Game Over state (pause, display message, restart prompt)
+8. Restart mechanic (reset state, reset score)
+9. localStorage high score persistence
+
+**Phase 2 — Full Feature Set (matches 5.2)**
+1. Duck mechanic (Down Arrow, reduced hitbox)
+2. Pterodactyl obstacle (3 height variants: low, mid, high)
+3. Day/night cycle (background color transition at score threshold)
+4. Touch controls (tap to jump, swipe-down to duck)
+5. Responsive scaling (canvas fits viewport down to 320px width)
+
+**Phase 3 — Polish (optional, pre-full-feature)**
+1. Start screen idle state (no auto-start)
+2. Score milestone visual flash (every 100 points)
+3. Smooth day/night transition (fade vs hard switch)
+
+### 6.4 Collision Detection Guidance
+
+Use axis-aligned bounding box (AABB) collision. Apply a small inset (~5px) on all sides of each entity's hitbox to avoid pixel-perfect frustration:
+
+```
+entity hitbox = { x + 5, y + 5, width - 10, height - 10 }
+```
+
+Collision occurs when hitboxes overlap on both X and Y axes.
+
+### 6.5 Rendering Approach Decision
+
+Canvas API is recommended over DOM for this game due to:
+- Better performance for per-frame redraws
+- Simpler coordinate system for physics
+- Easier pixel-level control
+
+DEV may use CSS pixel art sprites or drawn shapes (no external image assets required for a functional implementation).
+
+---
+
 *Document maintained by: PO Agent*
 *Last updated: 2026-03-01*
