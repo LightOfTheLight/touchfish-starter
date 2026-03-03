@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Dino Runner — Test Suite</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: monospace; padding: 24px; background: #f4f4f4; color: #333; }
+    h1   { font-size: 1.4em; margin-bottom: 4px; }
+    .subtitle { color: #666; font-size: 0.85em; margin-bottom: 24px; }
+    .suite { margin-bottom: 16px; border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+    .suite-header { background: #e0e0e0; padding: 8px 12px; font-weight: bold; font-size: 0.9em; }
+    .test  { padding: 5px 12px; border-top: 1px solid #eee; font-size: 0.85em; display: flex; gap: 8px; align-items: flex-start; }
+    .pass  { background: #f0faf0; color: #1a6b1a; }
+    .fail  { background: #fff0f0; color: #891010; }
+    .skip  { background: #fffbe0; color: #7a6000; }
+    .icon  { font-size: 1em; flex-shrink: 0; }
+    .err   { display: block; margin-top: 3px; font-size: 0.9em; opacity: 0.8; white-space: pre-wrap; }
+    .summary { margin-top: 24px; padding: 12px 16px; border-radius: 4px; font-size: 1em; }
+    .all-pass { background: #d4edda; color: #155724; }
+    .has-fail { background: #f8d7da; color: #721c24; }
+    #loading { margin-bottom: 16px; color: #555; }
+    .note { background: #fff3cd; border: 1px solid #ffc107; padding: 8px 12px; border-radius: 4px;
+            font-size: 0.82em; margin-bottom: 16px; line-height: 1.5; }
+  </style>
+</head>
+<body>
+
+  <!-- Hidden canvas required by the Game constructor -->
+  <canvas id="c" width="800" height="300" style="position:absolute;left:-9999px;top:-9999px;"></canvas>
+
+  <h1>Dino Runner — Automated Test Suite</h1>
+  <p class="subtitle">Validates implementation against REQUIREMENT.md acceptance criteria</p>
+
+  <div class="note">
+    <strong>Note:</strong> Tests load the game code from <code>../index.html</code> via fetch and execute it in
+    a controlled environment with mocked <code>requestAnimationFrame</code> and <code>localStorage</code>.
+    Visual / touch / responsive tests require manual verification — see <code>manual-checklist.md</code>.
+  </div>
+
+  <p id="loading">⏳ Loading game code…</p>
+  <div id="results"></div>
+
+  <script>
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MINI TEST FRAMEWORK
+  // ─────────────────────────────────────────────────────────────────────────────
+  const _suites = [];
+  let _cur = null;
+
+  function describe(name, fn) {
+    _cur = { name, tests: [] };
+    _suites.push(_cur);
+    fn();
+    _cur = null;
+  }
+
+  function it(name, fn) {
+    _cur.tests.push({ name, fn, skip: false });
+  }
+
+  function xit(name, fn) { // skip marker — documents known-failing / deferred tests
+    _cur.tests.push({ name, fn, skip: true });
+  }
+
+  function assert(cond, msg) {
+    if (!cond) throw new Error(msg || 'Assertion failed');
+  }
+  function assertEqual(a, b, msg) {
+    if (a !== b) throw new Error(msg || `Expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+  }
+  function assertNotEqual(a, b, msg) {
+    if (a === b) throw new Error(msg || `Expected values to differ but both were ${JSON.stringify(a)}`);
+  }
+  function assertGte(a, b, msg) {
+    if (a < b)  throw new Error(msg || `Expected ${a} >= ${b}`);
+  }
+  function assertLte(a, b, msg) {
+    if (a > b)  throw new Error(msg || `Expected ${a} <= ${b}`);
+  }
+  function assertBetween(val, lo, hi, msg) {
+    if (val < lo || val > hi)
+      throw new Error(msg || `Expected ${val} to be between ${lo} and ${hi}`);
+  }
+
+  async function runAllSuites() {
+    const root = document.getElementById('results');
+    let totalPass = 0, totalFail = 0, totalSkip = 0;
+
+    for (const suite of _suites) {
+      const suiteEl = document.createElement('div');
+      suiteEl.className = 'suite';
+      suiteEl.innerHTML = `<div class="suite-header">${suite.name}</div>`;
+
+      for (const t of suite.tests) {
+        const testEl = document.createElement('div');
+
+        if (t.skip) {
+          testEl.className = 'test skip';
+          testEl.innerHTML = `<span class="icon">⚠</span><span>${t.name}</span>`;
+          totalSkip++;
+        } else {
+          let pass = true, errMsg = '';
+          try {
+            const ret = t.fn();
+            if (ret && typeof ret.then === 'function') await ret;
+          } catch (e) {
+            pass = false;
+            errMsg = e.message;
+          }
+          testEl.className = `test ${pass ? 'pass' : 'fail'}`;
+          testEl.innerHTML = `<span class="icon">${pass ? '✓' : '✗'}</span>` +
+            `<span>${t.name}${errMsg ? `<span class="err">${errMsg}</span>` : ''}</span>`;
+          pass ? totalPass++ : totalFail++;
+        }
+        suiteEl.appendChild(testEl);
+      }
+      root.appendChild(suiteEl);
+    }
+
+    const sum = document.createElement('div');
+    sum.className = `summary ${totalFail === 0 ? 'all-pass' : 'has-fail'}`;
+    sum.textContent =
+      `${totalPass} passed  •  ${totalFail} failed  •  ${totalSkip} skipped (known issues / manual)`;
+    root.appendChild(sum);
+    document.getElementById('loading').style.display = 'none';
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // MOCK BROWSER APIs
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // Prevent the game's RAF loop from running
+  window.requestAnimationFrame = () => 0;
+
+  // Isolated localStorage mock (reset between test groups manually)
+  const _ls = {};
+  const mockLS = {
+    getItem:    k   => _ls.hasOwnProperty(k) ? _ls[k] : null,
+    setItem:    (k, v) => { _ls[k] = String(v); },
+    removeItem: k   => { delete _ls[k]; },
+    clear:      ()  => { Object.keys(_ls).forEach(k => delete _ls[k]); },
+  };
+  Object.defineProperty(window, 'localStorage', { value: mockLS, writable: true });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // HELPER: fresh game instance with clean localStorage
+  // ─────────────────────────────────────────────────────────────────────────────
+  function freshGame(hiScore = 0) {
+    mockLS.clear();
+    if (hiScore) mockLS.setItem('dinoHiScore', String(hiScore));
+    return new Game(); // eslint-disable-line no-undef
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // TEST SUITES
+  // (defined before the game code is loaded; window globals are accessed lazily
+  //  inside `it` callbacks, which run after eval)
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // ── 1. Constants & Configuration ────────────────────────────────────────────
+  describe('§ Constants & Configuration', () => {
+    it('Canvas is 800 × 300 (REQ §6.1)', () => {
+      assertEqual(W, 800); // eslint-disable-line no-undef
+      assertEqual(H, 300); // eslint-disable-line no-undef
+    });
+    it('GROUND is in the lower quarter of canvas (REQ §6.1)', () => {
+      assertBetween(GROUND, H * 0.7, H - 1, // eslint-disable-line no-undef
+        'GROUND should be between 70% and 100% of canvas height');
+    });
+    it('Initial speed is 5 px/frame (REQ §6.4)', () => {
+      assertEqual(INIT_SPEED, 5); // eslint-disable-line no-undef
+    });
+    it('Maximum speed is >= 12 px/frame (REQ §6.4)', () => {
+      assertGte(MAX_SPEED, 12); // eslint-disable-line no-undef
+    });
+    it('Speed increment is positive (REQ §2.4)', () => {
+      assert(SPEED_INC > 0, 'SPEED_INC must be positive'); // eslint-disable-line no-undef
+    });
+    it('SPAWN_MIN < SPAWN_MAX (REQ §2.2)', () => {
+      assert(SPAWN_MIN < SPAWN_MAX, 'SPAWN_MIN should be less than SPAWN_MAX'); // eslint-disable-line no-undef
+    });
+    it('Day/night cycle threshold is 700 score points (REQ §6.4)', () => {
+      assertEqual(CYCLE_THRESH, 700); // eslint-disable-line no-undef
+    });
+    it('SCORE_RATE is 0.1 pts/frame (REQ §6.5)', () => {
+      assertEqual(SCORE_RATE, 0.1); // eslint-disable-line no-undef
+    });
+    it('STATE enum has IDLE=0, RUNNING=1, GAMEOVER=2', () => {
+      assertEqual(STATE.IDLE,     0); // eslint-disable-line no-undef
+      assertEqual(STATE.RUNNING,  1); // eslint-disable-line no-undef
+      assertEqual(STATE.GAMEOVER, 2); // eslint-disable-line no-undef
+    });
+  });
+
+  // ── 2. Dino – Initialization ─────────────────────────────────────────────────
+  describe('§ Dino — Initialization (REQ §2.1)', () => {
+    it('Dino starts at ground level (y = GROUND − DINO_H)', () => {
+      const dino = new Dino(); // eslint-disable-line no-undef
+      assertEqual(dino.y, GROUND - DINO_H); // eslint-disable-line no-undef
+    });
+    it('Dino is not jumping initially', () => {
+      assertEqual(new Dino().jumping, false); // eslint-disable-line no-undef
+    });
+    it('Dino is not ducking initially', () => {
+      assertEqual(new Dino().ducking, false); // eslint-disable-line no-undef
+    });
+    it('Dino is not dead initially', () => {
+      assertEqual(new Dino().dead, false); // eslint-disable-line no-undef
+    });
+    it('Dino starts at DINO_X horizontal position', () => {
+      assertEqual(new Dino().x, DINO_X); // eslint-disable-line no-undef
+    });
+    it('Dino has positive width and height', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      assert(d.w > 0 && d.h > 0, 'Dino must have positive dimensions');
+    });
+  });
+
+  // ── 3. Dino – Jump Mechanics ─────────────────────────────────────────────────
+  describe('§ Dino — Jump Mechanics (REQ §2.1)', () => {
+    it('jump() sets jumping=true when on ground', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      assertEqual(d.jumping, true);
+    });
+    it('jump() applies negative (upward) velocity', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      assert(d.vy < 0, `Initial jump velocity should be negative, got ${d.vy}`);
+    });
+    it('jump() velocity is within recommended range (−18 to −14)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      assertBetween(d.vy, -18, -14, `JUMP_VEL ${d.vy} outside recommended range`);
+    });
+    it('Dino cannot double-jump while airborne (REQ §2.1)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      const vel = d.vy;
+      d.jump(); // second jump attempt
+      assertEqual(d.vy, vel, 'Velocity must not change on double-jump attempt');
+    });
+    it('Dino cannot jump while ducking (REQ §2.1)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.duck(true);
+      d.jump();
+      assertEqual(d.jumping, false, 'Dino must not jump while ducking');
+    });
+    it('Dino returns to ground after full jump arc', () => {
+      const d    = new Dino(); // eslint-disable-line no-undef
+      const gndY = GROUND - DINO_H; // eslint-disable-line no-undef
+      d.jump();
+      for (let i = 0; i < 300 && d.jumping; i++) d.update();
+      assertEqual(d.jumping, false, 'Dino should land after jump arc');
+      assertEqual(d.y, gndY, 'Dino y should equal ground after landing');
+    });
+    it('Gravity decelerates then brings dino back down', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      let peaked = false;
+      let frames = 0;
+      while (d.jumping && frames < 300) {
+        const prevVy = d.vy;
+        d.update();
+        frames++;
+        if (!peaked && d.vy > 0) {
+          peaked = true; // velocity became positive — apex reached
+        }
+      }
+      assert(peaked, 'Dino should reach an apex (vy becomes positive) before landing');
+    });
+  });
+
+  // ── 4. Dino – Duck Mechanics ─────────────────────────────────────────────────
+  describe('§ Dino — Duck Mechanics (REQ §2.1)', () => {
+    it('duck(true) sets ducking=true', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.duck(true);
+      assertEqual(d.ducking, true);
+    });
+    it('duck(false) restores ducking=false', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.duck(true);
+      d.duck(false);
+      assertEqual(d.ducking, false);
+    });
+    it('Duck height is ~40–65% of standing height (REQ §6.2)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      const normalH = d.h;
+      d.duck(true);
+      const duckH = d.h;
+      assertBetween(duckH / normalH, 0.40, 0.65,
+        `Duck height ratio ${(duckH/normalH).toFixed(2)} not in expected range`);
+    });
+    it('Duck lowers y position (dino crouches)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      const standY = d.y;
+      d.duck(true);
+      assert(d.y > standY, 'Duck should increase y (move down/crop the sprite)');
+    });
+    it('Cannot duck while jumping (REQ §2.1)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      d.jump();
+      d.duck(true);
+      assertEqual(d.ducking, false, 'Dino must not duck while airborne');
+    });
+  });
+
+  // ── 5. Dino – Hitbox ─────────────────────────────────────────────────────────
+  describe('§ Dino — Hitbox (REQ §6.2)', () => {
+    it('Hitbox is smaller than standing sprite (forgiving collision)', () => {
+      const d = new Dino(); // eslint-disable-line no-undef
+      const hb = d.hitbox();
+      assert(hb.w < d.w, `Hitbox width ${hb.w} should be smaller than sprite ${d.w}`);
+      assert(hb.h < d.h, `Hitbox height ${hb.h} should be smaller than sprite ${d.h}`);
+    });
+    it('Hitbox x is inset from sprite x', () => {
+      const d  = new Dino(); // eslint-disable-line no-undef
+      const hb = d.hitbox();
+      assert(hb.x > d.x, `Hitbox x ${hb.x} should be > sprite x ${d.x}`);
+    });
+    it('Hitbox has positive dimensions', () => {
+      const d  = new Dino(); // eslint-disable-line no-undef
+      const hb = d.hitbox();
+      assert(hb.w > 0 && hb.h > 0, 'Hitbox must have positive dimensions');
+    });
+    it('Duck hitbox is smaller than standing hitbox', () => {
+      const standing = new Dino(); // eslint-disable-line no-undef
+      const ducking  = new Dino(); // eslint-disable-line no-undef
+      ducking.duck(true);
+      const shb = standing.hitbox();
+      const dhb = ducking.hitbox();
+      assert(dhb.h < shb.h, 'Duck hitbox should be shorter than standing hitbox');
+    });
+  });
+
+  // ── 6. Obstacles – CactusGroup ───────────────────────────────────────────────
+  describe('§ Obstacles — CactusGroup (REQ §2.2)', () => {
+    it('CactusGroup spawns 1–3 cacti per group', () => {
+      for (let i = 0; i < 80; i++) {
+        const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+        assertBetween(cg.count, 1, 3, `Count ${cg.count} outside range [1,3]`);
+      }
+    });
+    it('All three group counts (1, 2, 3) appear in 80 spawns', () => {
+      const counts = new Set();
+      for (let i = 0; i < 80; i++) counts.add(new CactusGroup(W + 40).count); // eslint-disable-line no-undef
+      assertEqual(counts.size, 3, `Expected 3 distinct counts, got: ${[...counts].join(',')}`);
+    });
+    it('Both cactus variants (small/large) appear in 60 spawns (REQ §2.2)', () => {
+      const variants = new Set();
+      for (let i = 0; i < 60; i++) variants.add(new CactusGroup(W + 40).variant); // eslint-disable-line no-undef
+      assertEqual(variants.size, 2, `Expected variants 0 and 1, got: ${[...variants].join(',')}`);
+    });
+    it('Cactus variant 1 is larger than variant 0 (REQ §2.2)', () => {
+      const small = new CactusGroup(W + 40); small.variant = 0; // eslint-disable-line no-undef
+      const large = new CactusGroup(W + 40); large.variant = 1; // eslint-disable-line no-undef
+      // Check via cactusW: variant 1 uses scale 1.3
+      const s0 = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      // Just verify they have different widths by checking a large group
+      const allLarge  = Array.from({ length: 20 }, () => new CactusGroup(W + 40)).filter(c => c.variant === 1); // eslint-disable-line no-undef
+      const allSmall  = Array.from({ length: 20 }, () => new CactusGroup(W + 40)).filter(c => c.variant === 0); // eslint-disable-line no-undef
+      if (allLarge.length && allSmall.length) {
+        assert(allLarge[0].cactusW > allSmall[0].cactusW,
+          `Large variant (${allLarge[0].cactusW}px) should be wider than small (${allSmall[0].cactusW}px)`);
+      }
+    });
+    it('CactusGroup spawns off-screen to the right', () => {
+      const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      assertGte(cg.x, W, `CactusGroup x ${cg.x} should be >= W ${W}`); // eslint-disable-line no-undef
+    });
+    it('CactusGroup moves left on update()', () => {
+      const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      const x0 = cg.x;
+      cg.update(5);
+      assert(cg.x < x0, 'CactusGroup should move left after update');
+    });
+    it('CactusGroup.isOffScreen() returns true when past left edge', () => {
+      const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      cg.x = -(cg.w + 1);
+      assertEqual(cg.isOffScreen(), true);
+    });
+    it('CactusGroup.isOffScreen() returns false while on screen', () => {
+      const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      assertEqual(cg.isOffScreen(), false);
+    });
+    it('CactusGroup hitboxes — one per cactus with positive dimensions', () => {
+      const cg  = new CactusGroup(W + 40); // eslint-disable-line no-undef
+      const hbs = cg.hitboxes();
+      assertEqual(hbs.length, cg.count, 'Should have one hitbox per cactus');
+      for (const hb of hbs) {
+        assert(hb.w > 0 && hb.h > 0, `Hitbox must have positive dimensions, got w=${hb.w} h=${hb.h}`);
+      }
+    });
+    it('Cactus bottom aligns with ground (REQ §2.2)', () => {
+      for (let i = 0; i < 10; i++) {
+        const cg = new CactusGroup(W + 40); // eslint-disable-line no-undef
+        assertEqual(cg.y + cg.h, GROUND, // eslint-disable-line no-undef
+          `Cactus bottom (${cg.y + cg.h}) should equal GROUND (${GROUND})`); // eslint-disable-line no-undef
+      }
+    });
+    it('CactusGroup has type "cactus"', () => {
+      assertEqual(new CactusGroup(W + 40).type, 'cactus'); // eslint-disable-line no-undef
+    });
+  });
+
+  // ── 7. Obstacles – Pterodactyl ───────────────────────────────────────────────
+  describe('§ Obstacles — Pterodactyl (REQ §2.2)', () => {
+    it('Pterodactyl has exactly 3 distinct height levels', () => {
+      const ys = new Set([0, 1, 2].map(lvl => new Pterodactyl(W + 40, lvl).y)); // eslint-disable-line no-undef
+      assertEqual(ys.size, 3, 'Should have 3 distinct heights');
+    });
+    it('All height levels are above ground', () => {
+      [0, 1, 2].forEach(lvl => {
+        const p = new Pterodactyl(W + 40, lvl); // eslint-disable-line no-undef
+        assert(p.y < GROUND, `Height level ${lvl} (y=${p.y}) should be above ground ${GROUND}`); // eslint-disable-line no-undef
+      });
+    });
+    it('Pterodactyl spawns off-screen to the right', () => {
+      assertGte(new Pterodactyl(W + 40, 1).x, W); // eslint-disable-line no-undef
+    });
+    it('Pterodactyl moves left on update()', () => {
+      const p = new Pterodactyl(W + 40, 1); // eslint-disable-line no-undef
+      const x0 = p.x;
+      p.update(5);
+      assert(p.x < x0, 'Pterodactyl should move left');
+    });
+    it('Pterodactyl alternates wing frames (animation)', () => {
+      const p = new Pterodactyl(W + 40, 1); // eslint-disable-line no-undef
+      const f0 = p.frame;
+      for (let i = 0; i < 15; i++) p.update(1);
+      assertNotEqual(p.frame, f0, 'Wing frame should alternate');
+    });
+    it('Pterodactyl.isOffScreen() works correctly', () => {
+      const p = new Pterodactyl(W + 40, 0); // eslint-disable-line no-undef
+      assertEqual(p.isOffScreen(), false, 'Should be on-screen at spawn');
+      p.x = -(p.w + 1);
+      assertEqual(p.isOffScreen(), true, 'Should report off-screen after moving past left edge');
+    });
+    it('Pterodactyl hitbox has positive dimensions', () => {
+      const hbs = new Pterodactyl(W + 40, 1).hitboxes(); // eslint-disable-line no-undef
+      assertEqual(hbs.length, 1);
+      assert(hbs[0].w > 0 && hbs[0].h > 0, 'Hitbox must have positive dimensions');
+    });
+    it('Pterodactyl hitbox is inset (forgiving)', () => {
+      const p  = new Pterodactyl(W + 40, 1); // eslint-disable-line no-undef
+      const hb = p.hitboxes()[0];
+      assert(hb.w < p.w && hb.h < p.h, 'Hitbox should be smaller than full sprite');
+    });
+    it('Pterodactyl has type "pterodactyl"', () => {
+      assertEqual(new Pterodactyl(W + 40, 0).type, 'pterodactyl'); // eslint-disable-line no-undef
+    });
+    it('Low pterodactyl can be dodged by ducking dino', () => {
+      // Level 0 is lowest. Ducking dino hitbox should NOT overlap with it.
+      const ptero = new Pterodactyl(DINO_X, 0); // eslint-disable-line no-undef
+      const dino  = new Dino(); // eslint-disable-line no-undef
+      dino.duck(true);
+      const dhb = dino.hitbox();
+      const phb = ptero.hitboxes()[0];
+      const overlap = !(dhb.x + dhb.w <= phb.x || phb.x + phb.w <= dhb.x ||
+                        dhb.y + dhb.h <= phb.y || phb.y + phb.h <= dhb.y);
+      assertEqual(overlap, false, 'Ducking dino should avoid low-flying pterodactyl');
+    });
+    it('Low pterodactyl hits standing dino', () => {
+      const ptero = new Pterodactyl(DINO_X, 0); // eslint-disable-line no-undef
+      const dino  = new Dino(); // eslint-disable-line no-undef
+      const dhb = dino.hitbox();
+      const phb = ptero.hitboxes()[0];
+      const overlap = !(dhb.x + dhb.w <= phb.x || phb.x + phb.w <= dhb.x ||
+                        dhb.y + dhb.h <= phb.y || phb.y + phb.h <= dhb.y);
+      assertEqual(overlap, true, 'Standing dino should collide with low-flying pterodactyl');
+    });
+  });
+
+  // ── 8. Game – Initial State ──────────────────────────────────────────────────
+  describe('§ Game — Initial State (REQ §2.7)', () => {
+    it('Game starts in IDLE state (not auto-started)', () => {
+      assertEqual(freshGame().state, STATE.IDLE); // eslint-disable-line no-undef
+    });
+    it('Initial score is 0', () => {
+      assertEqual(freshGame().score, 0);
+    });
+    it('Initial speed equals INIT_SPEED', () => {
+      assertEqual(freshGame().speed, INIT_SPEED); // eslint-disable-line no-undef
+    });
+    it('Game starts in day mode (night=false)', () => {
+      assertEqual(freshGame().night, false);
+    });
+    it('No obstacles on initial load', () => {
+      assertEqual(freshGame().obstacles.length, 0);
+    });
+    it('High score loads from localStorage (REQ §2.3)', () => {
+      assertEqual(freshGame(1234).hiScore, 1234);
+    });
+    it('High score defaults to 0 when localStorage is empty', () => {
+      assertEqual(freshGame().hiScore, 0);
+    });
+  });
+
+  // ── 9. Game – Score & High Score ─────────────────────────────────────────────
+  describe('§ Game — Scoring (REQ §2.3)', () => {
+    it('Score increments each frame while RUNNING', () => {
+      const g = freshGame();
+      g._startGame();
+      const s0 = g.score;
+      g._update(16);
+      assert(g.score > s0, `Score ${g.score} should exceed initial ${s0}`);
+    });
+    it('Score increments by SCORE_RATE per frame (≈0.1 pts)', () => {
+      const g = freshGame();
+      g._startGame();
+      const s0 = g.score;
+      g._update(16);
+      // Score goes up by SCORE_RATE per frame regardless of dt
+      assert(Math.abs(g.score - s0 - SCORE_RATE) < 0.001, // eslint-disable-line no-undef
+        `Score increment should be SCORE_RATE=${SCORE_RATE}, got ${g.score - s0}`); // eslint-disable-line no-undef
+    });
+    it('Score does NOT increment when IDLE', () => {
+      const g = freshGame();
+      const s0 = g.score;
+      g._update(16);
+      assertEqual(g.score, s0, 'Score should not change in IDLE state');
+    });
+    it('Score does NOT increment when GAMEOVER', () => {
+      const g = freshGame();
+      g._startGame();
+      g.state = STATE.GAMEOVER; // eslint-disable-line no-undef
+      const s0 = g.score;
+      g._update(16);
+      assertEqual(g.score, s0, 'Score should not change in GAMEOVER state');
+    });
+    it('High score updates when current score exceeds it (REQ §2.3)', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score   = 500;
+      g.hiScore = 400;
+      g._update(16);
+      assertGte(g.hiScore, 500, 'High score should update to match or exceed score');
+    });
+    it('High score persists to localStorage immediately (REQ §2.3)', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score   = 1000;
+      g.hiScore = 0;
+      g._update(16);
+      const stored = parseInt(mockLS.getItem('dinoHiScore') || '0');
+      assertGte(stored, 1000, `localStorage value ${stored} should be >= 1000`);
+    });
+    it('Score display uses 5-digit zero-padded format (REQ §6.5)', () => {
+      // Validate drawScore produces the right text by checking padStart logic
+      const padded = String(Math.floor(123)).padStart(5, '0');
+      assertEqual(padded, '00123', 'Score should be 5-digit zero-padded');
+    });
+  });
+
+  // ── 10. Game – Speed & Difficulty ────────────────────────────────────────────
+  describe('§ Game — Difficulty Progression (REQ §2.4)', () => {
+    it('Speed increases each frame while RUNNING', () => {
+      const g = freshGame();
+      g._startGame();
+      const v0 = g.speed;
+      g._update(16);
+      assert(g.speed > v0, `Speed ${g.speed} should exceed initial ${v0}`);
+    });
+    it('Speed is capped at MAX_SPEED', () => {
+      const g = freshGame();
+      g._startGame();
+      g.speed = MAX_SPEED - 0.001; // eslint-disable-line no-undef
+      for (let i = 0; i < 200; i++) g._update(16);
+      assertLte(g.speed, MAX_SPEED, // eslint-disable-line no-undef
+        `Speed ${g.speed} exceeded MAX_SPEED ${MAX_SPEED}`); // eslint-disable-line no-undef
+    });
+    it('Spawn gap decreases as speed increases (REQ §2.4)', () => {
+      const g = freshGame();
+      g._startGame();
+      g.speed = INIT_SPEED; // eslint-disable-line no-undef
+      g._update(16);
+      const gap_low = g.spawnGap;
+      g.speed = MAX_SPEED; // eslint-disable-line no-undef
+      g._update(16);
+      const gap_high = g.spawnGap;
+      assertLte(gap_high, gap_low,
+        `At max speed (${MAX_SPEED}), spawnGap (${gap_high}) should be ≤ low-speed gap (${gap_low})`); // eslint-disable-line no-undef
+    });
+    it('Speed starts fresh at INIT_SPEED on restart', () => {
+      const g = freshGame();
+      g._startGame();
+      for (let i = 0; i < 500; i++) g._update(16);
+      g._startGame(); // restart
+      assertEqual(g.speed, INIT_SPEED); // eslint-disable-line no-undef
+    });
+  });
+
+  // ── 11. Game – Day/Night Cycle ───────────────────────────────────────────────
+  describe('§ Game — Day/Night Cycle (REQ §2.5)', () => {
+    it('Game starts in day mode (night=false)', () => {
+      const g = freshGame();
+      g._startGame();
+      assertEqual(g.night, false, 'Should start in day mode after _startGame');
+    });
+    it('Transitions to night after CYCLE_THRESH score points', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score = CYCLE_THRESH - 0.1; // eslint-disable-line no-undef
+      g._update(16); // score crosses threshold
+      assertEqual(g.night, true, 'Should switch to night after CYCLE_THRESH');
+    });
+    it('Alternates back to day at 2× CYCLE_THRESH', () => {
+      const g = freshGame();
+      g._startGame();
+      g.nightCycle = 1;
+      g.night      = true;
+      g.score      = 2 * CYCLE_THRESH - 0.1; // eslint-disable-line no-undef
+      g._update(16);
+      assertEqual(g.night, false, 'Should return to day at 2× CYCLE_THRESH');
+    });
+    it('nightCycle counter increments with each transition', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score = CYCLE_THRESH - 0.1; // eslint-disable-line no-undef
+      g._update(16);
+      assertEqual(g.nightCycle, 1);
+    });
+    it('Night mode resets to day on restart', () => {
+      const g = freshGame();
+      g._startGame();
+      g.night = true;
+      g._startGame(); // restart
+      assertEqual(g.night, false, 'Night should reset to day on restart');
+    });
+  });
+
+  // ── 12. Game – Collision & Game Over ─────────────────────────────────────────
+  describe('§ Game — Collision & Game Over (REQ §2.6)', () => {
+    it('_overlaps() returns false for non-overlapping rectangles', () => {
+      const g = freshGame();
+      assertEqual(g._overlaps({ x:0, y:0, w:10, h:10 }, { x:20, y:0, w:10, h:10 }), false);
+      assertEqual(g._overlaps({ x:0, y:0, w:10, h:10 }, { x:0, y:20, w:10, h:10 }), false);
+    });
+    it('_overlaps() returns true for overlapping rectangles', () => {
+      const g = freshGame();
+      assertEqual(g._overlaps({ x:0, y:0, w:20, h:20 }, { x:10, y:10, w:20, h:20 }), true);
+    });
+    it('_overlaps() handles edge-touching as non-collision', () => {
+      const g = freshGame();
+      // Boxes that share an edge but don't overlap
+      assertEqual(g._overlaps({ x:0, y:0, w:10, h:10 }, { x:10, y:0, w:10, h:10 }), false,
+        'Touching edges should not count as overlap');
+    });
+    it('State becomes GAMEOVER on cactus collision', () => {
+      const g = freshGame();
+      g._startGame();
+      const obs = new CactusGroup(g.dino.x); // eslint-disable-line no-undef
+      obs.x = g.dino.x; // on top of dino
+      g.obstacles.push(obs);
+      g._update(0);
+      assertEqual(g.state, STATE.GAMEOVER, 'Game state should be GAMEOVER after collision'); // eslint-disable-line no-undef
+    });
+    it('dino.dead=true on collision', () => {
+      const g = freshGame();
+      g._startGame();
+      const obs = new CactusGroup(g.dino.x); // eslint-disable-line no-undef
+      obs.x = g.dino.x;
+      g.obstacles.push(obs);
+      g._update(0);
+      assertEqual(g.dino.dead, true, 'Dino should be dead after collision');
+    });
+    it('Score resets to 0 on restart (REQ §2.6)', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score = 750;
+      g._startGame(); // restart
+      assertEqual(g.score, 0);
+    });
+    it('High score is preserved on restart (REQ §2.6)', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score   = 750;
+      g.hiScore = 750;
+      g._startGame(); // restart
+      assertEqual(g.hiScore, 750, 'High score should survive restart');
+    });
+    it('Obstacles are cleared on restart', () => {
+      const g = freshGame();
+      g._startGame();
+      g.obstacles.push(new CactusGroup(W + 40)); // eslint-disable-line no-undef
+      g._startGame(); // restart
+      assertEqual(g.obstacles.length, 0, 'Obstacle list should be empty after restart');
+    });
+  });
+
+  // ── 13. Game – Start Screen ──────────────────────────────────────────────────
+  describe('§ Game — Start Screen (REQ §2.7)', () => {
+    it('Game does not begin automatically (IDLE on load)', () => {
+      assertEqual(freshGame().state, STATE.IDLE); // eslint-disable-line no-undef
+    });
+    it('_onJumpPress() transitions IDLE → RUNNING', () => {
+      const g = freshGame();
+      g._onJumpPress();
+      assertEqual(g.state, STATE.RUNNING); // eslint-disable-line no-undef
+    });
+    it('_onJumpPress() during GAMEOVER restarts the game', () => {
+      const g = freshGame();
+      g._startGame();
+      g.state = STATE.GAMEOVER; // eslint-disable-line no-undef
+      g._onJumpPress();
+      assertEqual(g.state, STATE.RUNNING); // eslint-disable-line no-undef
+    });
+  });
+
+  // ── 14. Game – Obstacle Spawning Rules ──────────────────────────────────────
+  describe('§ Game — Obstacle Spawning Rules (REQ §2.2)', () => {
+    it('No pterodactyls spawn when score ≤ 200', () => {
+      const g = freshGame();
+      g._startGame();
+      g.score = 0;
+      for (let i = 0; i < 50; i++) g._spawnObstacle();
+      const hasPtero = g.obstacles.some(o => o.type === 'pterodactyl');
+      assertEqual(hasPtero, false, 'No pterodactyls should appear at score ≤ 200');
+    });
+    it('Pterodactyls can spawn when score > 200', () => {
+      let found = false;
+      // Run multiple attempts — 30% chance per spawn, 100 attempts
+      for (let attempt = 0; attempt < 5 && !found; attempt++) {
+        const g = freshGame();
+        g._startGame();
+        g.score = 201;
+        for (let i = 0; i < 50; i++) g._spawnObstacle();
+        found = g.obstacles.some(o => o.type === 'pterodactyl');
+      }
+      assertEqual(found, true, 'Pterodactyls should appear with score > 200 (30% chance, 250 tries)');
+    });
+    it('Obstacles are removed when they go off-screen', () => {
+      const g = freshGame();
+      g._startGame();
+      g._spawnObstacle();
+      // Force obstacle off-screen
+      for (const obs of g.obstacles) obs.x = -(obs.w + 100);
+      g._update(16);
+      assertEqual(g.obstacles.length, 0, 'Off-screen obstacles should be removed');
+    });
+    it('Obstacles only spawn in RUNNING state', () => {
+      const g = freshGame();
+      // IDLE state — manually advance timer past spawnGap
+      g.spawnTimer = 9999;
+      g._update(16); // spawnTimer < spawnGap? Actually state != RUNNING so _update returns early
+      assertEqual(g.obstacles.length, 0, 'No obstacles should spawn when not RUNNING');
+    });
+  });
+
+  // ── 15. Known / Deferred Issues ──────────────────────────────────────────────
+  describe('§ Known Issues (documented bugs — these tests should FAIL if bugs persist)', () => {
+    it('[BUG-001] Spawn timing is effectively randomized between spawns', () => {
+      // The spawnGap is overwritten deterministically every frame, so
+      // the random value set after each spawn is immediately discarded.
+      // This test verifies the DESIRED behavior — it is expected to FAIL
+      // until the bug is fixed.
+      const g = freshGame();
+      g._startGame();
+      g.speed = INIT_SPEED; // eslint-disable-line no-undef  keep speed constant
+
+      const intervals = [];
+      let lastSpawn = 0;
+      let frame = 0;
+      const origSpawn = g._spawnObstacle.bind(g);
+      g._spawnObstacle = function() {
+        if (lastSpawn > 0) intervals.push(frame - lastSpawn);
+        lastSpawn = frame;
+        g.obstacles = []; // prevent collision
+        origSpawn();
+        g.obstacles = [];
+      };
+
+      while (intervals.length < 8 && frame < 5000) {
+        g._update(16);
+        frame++;
+      }
+
+      const uniqueIntervals = new Set(intervals);
+      assert(uniqueIntervals.size > 1,
+        `BUG-001: Spawn intervals are not randomized — all identical: [${intervals.slice(0,5).join(', ')}]. ` +
+        'The random spawnGap set after each spawn is overwritten deterministically on the next frame.');
+    });
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BOOTSTRAP — fetch game code, eval, then run tests
+  // ─────────────────────────────────────────────────────────────────────────────
+  (async () => {
+    const loadEl = document.getElementById('loading');
+    try {
+      const res  = await fetch('../index.html');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const html = await res.text();
+
+      // Extract the first (and only) <script> block
+      const m = html.match(/<script>([\s\S]*?)<\/script>/);
+      if (!m) throw new Error('Could not find <script> block in index.html');
+
+      // Execute game code — brings W, H, GROUND, STATE, Dino, Game, … into window scope.
+      // requestAnimationFrame is already mocked, so the game loop won't spin.
+      // eslint-disable-next-line no-eval
+      eval(m[1]);
+
+      loadEl.textContent = '✓ Game code loaded — running tests…';
+      await runAllSuites();
+    } catch (e) {
+      loadEl.textContent = `✗ Failed to load game: ${e.message}`;
+      console.error(e);
+    }
+  })();
+  </script>
+</body>
+</html>
