@@ -64,8 +64,30 @@ The TESTER agent is responsible for creating, maintaining, and executing test ca
 1. Create or modify test files as needed
 2. Update `agents/TESTER/history.md` with session notes
 3. Commit all changes with descriptive messages
-4. Create or update PR with test summary
+4. **Write `.agent-test-result` file** with your verdict (see Pipeline Verdict below)
 5. Create GitHub Issues for any bugs found
+
+### Pipeline Verdict
+
+After testing, you MUST write a `.agent-test-result` file in the repository root to communicate your verdict to the pipeline:
+
+- **If all tests pass:** Write `PASS` to `.agent-test-result`
+- **If bugs are found that DEV needs to fix:** Write `FAIL @DEV` followed by a brief summary of the issues
+- **If requirements are unclear and PO needs to clarify:** Write `FAIL @PO` followed by what needs clarification
+
+Example (tests pass):
+```
+PASS - All 12 test cases passed. Implementation meets requirements.
+```
+
+Example (bugs found):
+```
+FAIL @DEV - 2 bugs found:
+1. Game collision detection not working for obstacles
+2. Score counter resets incorrectly on game restart
+```
+
+This file determines what happens next in the automated pipeline. Without it, the pipeline assumes approval.
 
 ---
 
