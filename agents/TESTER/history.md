@@ -156,11 +156,86 @@ The mobile duck requirement (2.1.5) is the sole failing criterion.
 
 ---
 
+---
+
+### Session 2 — 2026-03-03
+
+**Branch:** `agent/PO/20260303-150653`
+**Trigger:** Chain trigger from DEV fix commit `e6e5879` — "fix(DEV): fix mobile swipe-down duck — defer tap-jump to touchend"
+
+#### Context
+
+DEV resolved BUG-001 (mobile swipe-down duck broken) from Session 1. This session verifies the fix and re-tests all requirements.
+
+#### Thinking Process
+
+1. **Read context files** — Reviewed `TESTER.md` (role), `history.md` (Session 1 findings), `REQUIREMENT.md` (requirements unchanged), and the DEV fix commit.
+
+2. **Analyzed DEV's fix** — The fix modifies 3 touch event handlers in `index.html` (11 lines):
+   - `touchstart` during 'running' state now only records `touchStartY` — no longer calls `handleAction()` / `dino.jump()` immediately
+   - `touchmove` is unchanged in logic but now guards with a `touchDucking` flag
+   - `touchend` is a **new** handler that decides tap vs. swipe: if `!touchDucking`, fires `dino.jump()`; always releases duck on finger lift
+   - New state variable: `let touchDucking = false` (line 209)
+
+3. **Traced all touch scenarios:**
+
+   | Scenario | Outcome |
+   |----------|---------|
+   | Tap (finger down + up, dy < 30) | `touchend` → `!touchDucking` → `jump()` ✅ |
+   | Swipe down (dy > 30 during move) | `touchmove` → `touchDucking=true`, `duck(true)` ✅ |
+   | Swipe then lift | `touchend` → `touchDucking=true` (no jump), `duck(false)` ✅ |
+   | Idle state tap | `touchstart` → `handleAction()` → `startGame()` ✅ |
+   | Game over tap | `touchstart` → `handleAction()` → `restartGame()` ✅ |
+   | Tap while airborne | `touchend` → `jump()` called, `!jumping` guard blocks → no double-jump ✅ |
+   | Keyboard duck held + touch lift | `touchend` checks `!duckKey` before releasing duck ✅ |
+
+4. **Re-validated all requirements** — Core game logic (physics, scoring, collision, day/night, obstacles) is unchanged from Session 1. Only touch input handling was modified. All Session 1 passing tests remain valid.
+
+#### Test Results — Session 2
+
+##### 2.1 Dinosaur Character (re-tested touch controls)
+
+| Criterion | Result | Notes |
+|-----------|--------|-------|
+| Running animation (alternating legs) | ✅ PASS | Unchanged |
+| Space/Up Arrow → jump | ✅ PASS | Unchanged |
+| Down Arrow → duck | ✅ PASS | Unchanged |
+| Tap screen → jump (mobile) | ✅ PASS | Now fires on `touchend` when `!touchDucking` |
+| Swipe down → duck (mobile) | ✅ **FIXED** | `touchstart` no longer pre-empts with jump; `touchmove` correctly triggers duck |
+| Distinct jump/duck animations | ✅ PASS | Unchanged |
+| No double-jump | ✅ PASS | `jump()` guard `!this.jumping` unchanged |
+
+##### All Other Requirements (carried from Session 1)
+
+All previously passing requirements remain unchanged — no regression introduced:
+- 2.2 Obstacles: ✅ (5 cactus variants, 3 ptero heights, random spawn, collision)
+- 2.3 Scoring: ✅ (continuous, display, high score, localStorage)
+- 2.4 Difficulty: ✅ (speed ramp, SPD_INC, MAX_SPD cap)
+- 2.5 Day/Night Cycle: ✅ (every 700 pts, alternating, all elements visible)
+- 2.6 Game Over & Restart: ✅ (pause, overlay, Space/Up/tap restart, score reset)
+- 2.7 Start Screen: ✅ (idle state, "PRESS SPACE TO START", no auto-start)
+- Technical: ✅ (vanilla JS, single file, Canvas API, 60fps loop, responsive)
+
+#### Verdict
+
+**PASS** — BUG-001 is correctly resolved. All 26 acceptance criteria now pass.
+
+The fix is well-reasoned: deferring jump to `touchend` is the idiomatic approach for disambiguating tap vs. swipe on touch devices. The `touchDucking` flag cleanly tracks intent and resets properly. No regressions detected.
+
+#### Output
+
+- `agents/TESTER/history.md` updated (this session)
+- `.agent-test-result` written with `PASS` verdict
+- No source code modified (TESTER does not own source files)
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-03 | Session 1 | First test run — identified BUG-001 (mobile swipe duck broken) |
+| 2026-03-03 | Session 2 | Re-test after DEV fix — BUG-001 resolved, all requirements pass |
 
 ---
 
