@@ -1,0 +1,36 @@
+FAIL @DEV
+
+1 bug found:
+
+BUG-001 (Severity: Medium) — Mobile swipe-down to duck is broken
+
+Requirement: REQUIREMENT.md §2.1 — "Swiping down on the screen causes the dinosaur to duck (mobile)"
+
+Root cause:
+- `touchstart` always fires `handleAction()` → `dino.jump()`, setting `jumping = true`
+- When finger moves down ≥30px, `touchmove` calls `dino.duck(true)`
+- `duck()` guards with `if (on && !this.jumping)` — since `jumping` is now `true`, duck is silently ignored
+- Duck via swipe is therefore NEVER activated; the dino jumps instead
+
+Affected code:
+- index.html:239 — touchstart fires handleAction() → jump
+- index.html:248 — touchmove fires dino.duck(true)
+- index.html:132 — duck() guard blocks duck while jumping
+
+Suggested fix:
+Defer the jump action from touchstart to touchend, firing jump only when total touch displacement is small (a tap, not a swipe). On touchend: if |dy| < ~20px → jump; otherwise, the swipe was already handled as a duck.
+
+All other requirements pass:
+- Dinosaur animation (running, jumping, ducking) ✅
+- Keyboard controls (Space/Up jump, Down duck, no double-jump) ✅
+- Tap to jump on mobile ✅
+- Obstacle types (5 cactus variants, 3 pterodactyl heights) ✅
+- Collision detection (AABB with forgiving hitboxes) ✅
+- Scoring (continuous increment, 5-digit display, high score) ✅
+- localStorage persistence ✅
+- Difficulty progression (speed ramp, cap at 13 px/frame) ✅
+- Day/night cycle (every 700 pts, alternating) ✅
+- Game over + restart (Space/Up/tap) ✅
+- Start screen (idle state, "PRESS SPACE TO START") ✅
+- Vanilla HTML/CSS/JS, single-file structure ✅
+- Responsive canvas (max-width 800px, scales to screen) ✅
