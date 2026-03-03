@@ -132,11 +132,66 @@ Features implemented vs REQUIREMENT.md:
 
 ---
 
+---
+
+### Session 2 — 2026-03-03
+
+**Branch:** `agent/PO/20260303-150653`
+**Trigger:** Chain trigger from TESTER Session 1 — "Chain trigger: DEV" (bug fix)
+
+#### Context
+
+TESTER Session 1 performed static analysis of the Session 1 implementation and issued a **FAIL** verdict due to one bug:
+
+- **BUG-001 (Medium):** Mobile swipe-down duck broken — `touchstart` always fired `dino.jump()` first, setting `jumping = true`, after which the `touchmove`-triggered `dino.duck(true)` was silently blocked by the `if (on && !this.jumping)` guard in `duck()`.
+
+All other requirements (32/33 criteria) passed. Desktop play was fully functional.
+
+#### Thinking Process
+
+1. **Root cause confirmed** — `touchstart` immediately called `handleAction()` → `dino.jump()` → `jumping = true`. Any subsequent `touchmove` duck attempt was blocked by the duck guard.
+
+2. **Fix strategy** — Defer the jump action to `touchend` for the running state only:
+   - `touchstart`: record `touchStartY`; call `handleAction()` immediately only if `state !== 'running'` (idle/gameover have no duck ambiguity)
+   - `touchmove`: unchanged — detects `dy > 30` and calls `dino.duck(true)` (now fires before any jump)
+   - `touchend`: if running and `!touchDucking` (tap, not swipe) → call `dino.jump()`; reset `touchDucking`; release duck
+
+3. **Scenario verification:**
+
+   | Scenario | Before Fix | After Fix |
+   |----------|-----------|-----------|
+   | Swipe down (duck) | Jump fires on touchstart, duck blocked | No jump on touchstart; duck fires correctly on touchmove |
+   | Tap (jump) | Works (jump on touchstart) | Jump deferred to touchend; still works |
+   | Tap to start (idle) | Works (handleAction on touchstart) | Unchanged — handleAction fires on touchstart for non-running states |
+   | Tap to restart (gameover) | Works | Unchanged — same as idle |
+   | No double jump | Works | Still guarded by `!this.jumping` in `jump()` |
+
+#### Implementation
+
+**File modified:** `index.html`
+
+**Change:** `touchstart` / `touchend` handlers restructured (lines 236–262):
+- `touchstart`: only calls `handleAction()` when `state !== 'running'`
+- `touchend`: calls `dino.jump()` when `state === 'running'` and `!touchDucking`
+
+Lines changed: ~8 lines modified (no structural changes to game logic).
+
+#### Decisions
+
+| Item | Decision |
+|------|----------|
+| Approach | Defer jump to touchend for running state; immediate for idle/gameover |
+| Why not touchend for all states | Idle/gameover have no duck ambiguity — touchend would add latency to start/restart with no benefit |
+| Duck release on touchend | Preserved — `dino.duck(false)` still called on touchend if not using keyboard duck (`!duckKey`) |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-03 | Session 1 | Initial implementation of Google Dinosaur game in index.html |
+| 2026-03-03 | Session 2 | Fix BUG-001: deferred mobile jump to touchend to allow swipe-down duck |
 
 ---
 

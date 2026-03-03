@@ -236,7 +236,8 @@
   cvs.addEventListener('touchstart', e => {
     e.preventDefault();
     touchStartY = e.touches[0].clientY;
-    handleAction();
+    // For idle/gameover, act immediately (no duck ambiguity)
+    if (state !== 'running') handleAction();
   }, { passive: false });
 
   cvs.addEventListener('touchmove', e => {
@@ -252,8 +253,12 @@
 
   cvs.addEventListener('touchend', e => {
     e.preventDefault();
-    touchDucking = false;
-    if (!duckKey) dino.duck(false);
+    if (state === 'running') {
+      // If no downward swipe was detected, treat as a tap → jump
+      if (!touchDucking) dino.jump();
+      touchDucking = false;
+      if (!duckKey) dino.duck(false);
+    }
   }, { passive: false });
 
   // ─── Game control ────────────────────────────────────────────────────────────
