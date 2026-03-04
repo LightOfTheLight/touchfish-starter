@@ -1,0 +1,25 @@
+PASS
+
+All 26 acceptance criteria pass. BUG-001 (mobile swipe-down duck broken) is resolved.
+
+DEV fix verified (commit e6e5879):
+- touchstart during gameplay no longer pre-empts with jump()
+- touchmove (dy > 30) correctly triggers dino.duck(true) — unblocked now that jumping is never pre-set
+- touchend disambiguates tap vs. swipe: fires dino.jump() only when !touchDucking
+- touchDucking flag resets cleanly on finger lift; keyboard duck coexists correctly
+
+All other requirements carried from Session 1 remain passing:
+- Dinosaur animation (running, jumping, ducking) ✅
+- Keyboard controls (Space/Up jump, Down duck, no double-jump) ✅
+- Tap to jump on mobile ✅
+- Swipe down to duck on mobile ✅ (was FAIL, now PASS)
+- Obstacle types (5 cactus variants, 3 pterodactyl heights) ✅
+- Collision detection (AABB with forgiving hitboxes) ✅
+- Scoring (continuous increment, 5-digit display, high score) ✅
+- localStorage persistence ✅
+- Difficulty progression (speed ramp, cap at 13 px/frame) ✅
+- Day/night cycle (every 700 pts, alternating) ✅
+- Game over + restart (Space/Up/tap) ✅
+- Start screen (idle state, "PRESS SPACE TO START") ✅
+- Vanilla HTML/CSS/JS, single-file structure ✅
+- Responsive canvas (max-width 800px, scales to screen) ✅

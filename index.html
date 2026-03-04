@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Dinosaur Game</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #f7f7f7;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      font-family: 'Courier New', Courier, monospace;
+      transition: background 0.4s;
+    }
+
+    #wrap {
+      width: 100%;
+      max-width: 800px;
+      padding: 0 12px;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      border: 2px solid #535353;
+      cursor: pointer;
+      touch-action: none;
+      transition: border-color 0.4s;
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="c" width="800" height="300"></canvas>
+  </div>
+
+  <script>
+  // ─── Constants ───────────────────────────────────────────────────────────────
+  const W = 800, H = 300;
+  const GROUND = 260;          // y-coord of top of ground line (y increases downward)
+  const FRAME = 1000 / 60;     // ~16.67ms — unit for dt normalization
+
+  const INIT_SPD   = 5;        // px/frame at 60fps
+  const MAX_SPD    = 13;
+  const SPD_INC    = 0.001;    // per normalized frame
+
+  const GRAV       = 0.9;      // px/frame² at 60fps
+  const JUMP_VEL   = -16;      // px/frame at 60fps (negative = upward)
+
+  const DINO_STAND_W = 44;
+  const DINO_STAND_H = 48;
+  const DINO_DUCK_W  = 56;
+  const DINO_DUCK_H  = 26;
+  const DINO_X       = 80;
+
+  const DAY_NIGHT_INTERVAL = 700;  // score points between day/night toggle
+  const SCORE_INC          = 0.1;  // score per normalized frame
+  const MIN_SPAWN          = 800;  // ms — min time between obstacles
+  const MAX_SPAWN          = 2000; // ms — max time between obstacles
+
+  // ─── Canvas ──────────────────────────────────────────────────────────────────
+  const cvs = document.getElementById('c');
+  const ctx = cvs.getContext('2d');
+
+  // ─── Game state ──────────────────────────────────────────────────────────────
+  let state    = 'idle';    // 'idle' | 'running' | 'gameover'
+  let score    = 0;
+  let hiScore  = parseInt(localStorage.getItem('dino_hi') || '0', 10);
+  let spd      = INIT_SPD;
+  let night    = false;
+  let lastCycleAt = 0;      // score value when last day/night toggle happened
+
+  let obstacles  = [];
+  let spawnTimer = 0;
+  let spawnIn    = 1500;    // ms until next obstacle spawn
+
+  let clouds     = [];
+  let cloudTimer = 0;
+  let cloudIn    = 3000;
+
+  let lastTs = 0;           // previous requestAnimationFrame timestamp
+
+  // Pre-generated scrolling ground pebbles
+  const pebbles = Array.from({ length: 40 }, () => ({
+    x: Math.random() * W * 2,
+    y: GROUND + 4 + Math.floor(Math.random() * 8),
+    w: 2 + Math.floor(Math.random() * 3),
+    h: 1 + Math.floor(Math.random() * 2)
+  }));
+
+  // Pre-generated stars (visible in night mode only)
+  const stars = Array.from({ length: 80 }, () => ({
+    x: Math.random() * W,
+    y: 5 + Math.random() * (GROUND - 60)
+  }));
+
+  // ─── Dino ────────────────────────────────────────────────────────────────────
+  const dino = {
+    x: DINO_X,
+    y: GROUND - DINO_STAND_H,
+    w: DINO_STAND_W,
+    h: DINO_STAND_H,
+    vy: 0,
+    jumping: false,
+    ducking: false,
+    legFrame: 0,
+    legTimer: 0,
+
+    // Forgiving hitbox — inset from sprite edges
+    hb() {
+      if (this.ducking) {
+        // Ducking: wider but shorter — use smaller y-inset
+        return { x: this.x + 8, y: this.y + 4, w: this.w - 16, h: this.h - 8 };
+      }
+      return { x: this.x + 8, y: this.y + 8, w: this.w - 16, h: this.h - 8 };
+    },
+
+    jump() {
+      if (!this.jumping && !this.ducking) {
+        this.vy = JUMP_VEL;
+        this.jumping = true;
+      }
+    },
+
+    duck(on) {
+      if (on && !this.jumping) {
+        if (!this.ducking) {
+          this.ducking = true;
+          this.w = DINO_DUCK_W;
+          this.h = DINO_DUCK_H;
+          this.y = GROUND - DINO_DUCK_H;
+        }
+      } else if (!on && this.ducking) {
+        this.ducking = false;
+        this.w = DINO_STAND_W;
+        this.h = DINO_STAND_H;
+        if (!this.jumping) this.y = GROUND - DINO_STAND_H;
+      }
+    },
+
+    update(dt) {
+      // Gravity / jump physics
+      if (this.jumping) {
+        this.vy += GRAV * dt;
+        this.y  += this.vy * dt;
+        const floor = GROUND - this.h;
+        if (this.y >= floor) {
+          this.y       = floor;
+          this.vy      = 0;
+          this.jumping = false;
+        }
+      }
+      // Leg animation (every 100ms)
+      this.legTimer += dt * FRAME;
+      if (this.legTimer >= 100) {
+        this.legFrame ^= 1;
+        this.legTimer -= 100;
+      }
+    }
+  };
+
+  // ─── Obstacle types ──────────────────────────────────────────────────────────
+  // dy: offset so that y = GROUND + dy - h (negative = above ground)
+  const OBS_TYPES = [
+    { type: 'cactus', v: 'sm1', w: 22,  h: 44 },
+    { type: 'cactus', v: 'sm2', w: 46,  h: 44 },
+    { type: 'cactus', v: 'sm3', w: 70,  h: 44 },
+    { type: 'cactus', v: 'lg1', w: 28,  h: 54 },
+    { type: 'cactus', v: 'lg2', w: 58,  h: 54 },
+    { type: 'ptero',  v: 'low', w: 46,  h: 30, dy: -20  },  // near ground: jump or duck
+    { type: 'ptero',  v: 'mid', w: 46,  h: 30, dy: -30  },  // head height: duck required
+    { type: 'ptero',  v: 'high',w: 46,  h: 30, dy: -80  },  // above head: run under
+  ];
+
+  function spawnObstacle() {
+    const t   = OBS_TYPES[Math.floor(Math.random() * OBS_TYPES.length)];
+    const obs = {
+      type: t.type,
+      v:    t.v,
+      w:    t.w,
+      h:    t.h,
+      x:    W + 10,
+      y:    t.type === 'cactus' ? GROUND - t.h : GROUND + t.dy - t.h,
+      wf:   0,   // wing frame (ptero)
+      wt:   0,   // wing frame timer
+      hb() {
+        const m = 6;
+        return { x: this.x + m, y: this.y + m, w: this.w - m * 2, h: this.h - m * 2 };
+      }
+    };
+    obstacles.push(obs);
+  }
+
+  // ─── Collision ───────────────────────────────────────────────────────────────
+  function overlaps(a, b) {
+    return a.x < b.x + b.w && a.x + a.w > b.x
+        && a.y < b.y + b.h && a.y + a.h > b.y;
+  }
+
+  // ─── Input ───────────────────────────────────────────────────────────────────
+  let duckKey        = false;
+  let touchStartY    = 0;
+  let touchDucking   = false;
+
+  function handleAction() {
+    if (state === 'idle')     { startGame();   return; }
+    if (state === 'gameover') { restartGame(); return; }
+    if (state === 'running')  { dino.jump();          }
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+      e.preventDefault();
+      handleAction();
+    }
+    if (e.code === 'ArrowDown') {
+      e.preventDefault();
+      duckKey = true;
+      if (state === 'running') dino.duck(true);
+    }
+  });
+
+  document.addEventListener('keyup', e => {
+    if (e.code === 'ArrowDown') {
+      duckKey = false;
+      dino.duck(false);
+    }
+  });
+
+  cvs.addEventListener('touchstart', e => {
+    e.preventDefault();
+    touchStartY = e.touches[0].clientY;
+    // For idle/gameover, act immediately (no duck ambiguity)
+    if (state !== 'running') handleAction();
+  }, { passive: false });
+
+  cvs.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (state === 'running') {
+      const dy = e.touches[0].clientY - touchStartY;
+      if (dy > 30 && !touchDucking) {
+        touchDucking = true;
+        dino.duck(true);
+      }
+    }
+  }, { passive: false });
+
+  cvs.addEventListener('touchend', e => {
+    e.preventDefault();
+    if (state === 'running') {
+      // If no downward swipe was detected, treat as a tap → jump
+      if (!touchDucking) dino.jump();
+      touchDucking = false;
+      if (!duckKey) dino.duck(false);
+    }
+  }, { passive: false });
+
+  // ─── Game control ────────────────────────────────────────────────────────────
+  function startGame() {
+    state       = 'running';
+    score       = 0;
+    spd         = INIT_SPD;
+    night       = false;
+    lastCycleAt = 0;
+
+    obstacles  = [];
+    spawnTimer = 0;
+    spawnIn    = 1500;
+
+    clouds     = [];
+    cloudTimer = 0;
+    cloudIn    = 3000;
+
+    // Reset dino
+    dino.x        = DINO_X;
+    dino.y        = GROUND - DINO_STAND_H;
+    dino.w        = DINO_STAND_W;
+    dino.h        = DINO_STAND_H;
+    dino.vy       = 0;
+    dino.jumping  = false;
+    dino.ducking  = false;
+    dino.legFrame = 0;
+    dino.legTimer = 0;
+
+    // Apply held keys
+    if (duckKey) dino.duck(true);
+
+    // Reset visual theme
+    applyTheme(false);
+    spawnCloud();
+  }
+
+  function restartGame() { startGame(); }
+
+  function gameOver() {
+    state = 'gameover';
+    const finalScore = Math.floor(score);
+    const storedHi   = parseInt(localStorage.getItem('dino_hi') || '0', 10);
+    const newHi      = Math.max(storedHi, finalScore);
+    hiScore          = newHi;
+    localStorage.setItem('dino_hi', newHi);
+  }
+
+  function applyTheme(isNight) {
+    night = isNight;
+    document.body.style.background   = isNight ? '#1a1a1a' : '#f7f7f7';
+    cvs.style.borderColor             = isNight ? '#888888' : '#535353';
+  }
+
+  // ─── Clouds ──────────────────────────────────────────────────────────────────
+  function spawnCloud() {
+    clouds.push({
+      x: W + 10,
+      y: 20 + Math.random() * (GROUND - 130),
+      w: 60 + Math.random() * 50,
+      h: 18 + Math.random() * 12
+    });
+  }
+
+  // ─── Update ──────────────────────────────────────────────────────────────────
+  function update(dt) {
+    if (state !== 'running') return;
+
+    // Score & speed
+    score += SCORE_INC * dt;
+    if (score > hiScore) hiScore = score;
+    spd = Math.min(spd + SPD_INC * dt, MAX_SPD);
+
+    // Day/night cycle
+    if (score - lastCycleAt >= DAY_NIGHT_INTERVAL) {
+      lastCycleAt = score;
+      applyTheme(!night);
+    }
+
+    // Dino physics & animation
+    dino.update(dt);
+
+    // Clouds
+    cloudTimer += dt * FRAME;
+    if (cloudTimer >= cloudIn) {
+      cloudTimer -= cloudIn;
+      cloudIn = 3000 + Math.random() * 5000;
+      spawnCloud();
+    }
+    for (const c of clouds) c.x -= spd * 0.3 * dt;
+    clouds = clouds.filter(c => c.x + c.w > 0);
+
+    // Ground pebbles — scroll and wrap
+    for (const p of pebbles) {
+      p.x -= spd * dt;
+      if (p.x + p.w < 0) {
+        p.x = W + Math.random() * W;
+        p.y = GROUND + 4 + Math.floor(Math.random() * 8);
+      }
+    }
+
+    // Obstacle spawning
+    spawnTimer += dt * FRAME;
+    if (spawnTimer >= spawnIn) {
+      spawnTimer -= spawnIn;
+      // Decrease spawn interval as speed increases
+      const speedRatio = (spd - INIT_SPD) / (MAX_SPD - INIT_SPD);
+      const range      = MAX_SPAWN - MIN_SPAWN;
+      spawnIn          = MIN_SPAWN + range * (1 - speedRatio * 0.5) * Math.random();
+      spawnObstacle();
+    }
+
+    // Move obstacles & animate pterodactyls
+    for (const obs of obstacles) {
+      obs.x -= spd * dt;
+      if (obs.type === 'ptero') {
+        obs.wt += dt * FRAME;
+        if (obs.wt >= 200) { obs.wf ^= 1; obs.wt -= 200; }
+      }
+    }
+    obstacles = obstacles.filter(o => o.x + o.w > 0);
+
+    // Collision detection
+    const dhb = dino.hb();
+    for (const obs of obstacles) {
+      if (overlaps(dhb, obs.hb())) { gameOver(); return; }
+    }
+  }
+
+  // ─── Draw helpers ────────────────────────────────────────────────────────────
+  const DAY_COLORS   = { bg: '#f7f7f7', fg: '#535353', eyeBg: '#f7f7f7', cloud: '#d8d8d8' };
+  const NIGHT_COLORS = { bg: '#1a1a1a', fg: '#cccccc', eyeBg: '#1a1a1a', cloud: '#3a3a3a' };
+  function colors() { return night ? NIGHT_COLORS : DAY_COLORS; }
+
+  // Single small cactus unit — 22 × 44 at (x, y)
+  function drawSmallCactus(x, y, fg) {
+    ctx.fillStyle = fg;
+    ctx.fillRect(x + 8,  y,      6,  44); // main stem
+    ctx.fillRect(x,      y + 14, 8,   4); // left arm H
+    ctx.fillRect(x,      y + 8,  4,  10); // left arm tip V
+    ctx.fillRect(x + 14, y + 22, 8,   4); // right arm H
+    ctx.fillRect(x + 18, y + 14, 4,  12); // right arm tip V
+  }
+
+  // Single large cactus unit — 28 × 54 at (x, y)
+  function drawLargeCactus(x, y, fg) {
+    ctx.fillStyle = fg;
+    ctx.fillRect(x + 10, y,      8,  54); // main stem
+    ctx.fillRect(x,      y + 16, 10,  6); // left arm H
+    ctx.fillRect(x,      y + 8,  6,  14); // left arm tip V
+    ctx.fillRect(x + 18, y + 28, 10,  6); // right arm H
+    ctx.fillRect(x + 22, y + 18, 6,  16); // right arm tip V
+  }
+
+  function drawObstacle(obs) {
+    const fg = colors().fg;
+    if (obs.type === 'cactus') {
+      switch (obs.v) {
+        case 'sm1': drawSmallCactus(obs.x, obs.y, fg); break;
+        case 'sm2':
+          drawSmallCactus(obs.x,      obs.y, fg);
+          drawSmallCactus(obs.x + 24, obs.y, fg);
+          break;
+        case 'sm3':
+          drawSmallCactus(obs.x,      obs.y, fg);
+          drawSmallCactus(obs.x + 24, obs.y, fg);
+          drawSmallCactus(obs.x + 48, obs.y, fg);
+          break;
+        case 'lg1': drawLargeCactus(obs.x, obs.y, fg); break;
+        case 'lg2':
+          drawLargeCactus(obs.x,      obs.y, fg);
+          drawLargeCactus(obs.x + 30, obs.y, fg);
+          break;
+      }
+    } else {
+      drawPtero(obs.x, obs.y, obs.wf, fg);
+    }
+  }
+
+  // Pterodactyl — 46 × 30 at (x, y), facing left (direction of travel)
+  function drawPtero(x, y, wf, fg) {
+    ctx.fillStyle = fg;
+    ctx.fillRect(x + 14, y + 12, 20, 12); // body
+    ctx.fillRect(x + 6,  y + 8,  12, 10); // head
+    ctx.fillRect(x,      y + 10,  8,  5); // beak
+    ctx.fillRect(x + 32, y + 16, 10,  6); // tail
+    if (wf === 0) {
+      ctx.fillRect(x + 8, y + 2,  26, 8); // wings up
+    } else {
+      ctx.fillRect(x + 8, y + 18, 26, 8); // wings down
+    }
+  }
+
+  // Dinosaur — standing 44×48 or ducking 56×26 at (x, y)
+  function drawDino(x, y, ducking, jumping, legF, fg, eyeBg) {
+    ctx.fillStyle = fg;
+
+    if (ducking) {
+      // Ducking body — lower profile
+      ctx.fillRect(x + 4,  y + 8,  44, 14); // body
+      ctx.fillRect(x + 34, y,      20, 14); // head
+      ctx.fillRect(x + 34, y + 8,  12, 10); // neck
+      ctx.fillRect(x,      y + 10, 10,  8); // tail
+      ctx.fillRect(x + 34, y + 12,  8,  4); // arm
+      if (legF === 0) {
+        ctx.fillRect(x + 14, y + 20,  8,  6); // back leg
+        ctx.fillRect(x + 24, y + 20,  8,  2); // front leg
+      } else {
+        ctx.fillRect(x + 14, y + 20,  8,  2); // back leg
+        ctx.fillRect(x + 24, y + 20,  8,  6); // front leg
+      }
+      ctx.fillStyle = eyeBg;
+      ctx.fillRect(x + 46, y + 3, 4, 4); // eye
+      ctx.fillStyle = fg;
+
+    } else {
+      // Standing body
+      ctx.fillRect(x,      y + 28, 10,  8); // tail
+      ctx.fillRect(x + 8,  y + 18, 24, 22); // body
+      ctx.fillRect(x + 18, y + 8,  12, 16); // neck
+      ctx.fillRect(x + 16, y,      22, 16); // head
+      ctx.fillRect(x + 22, y - 4,   6,  6); // dorsal fin
+      ctx.fillRect(x + 18, y + 24,  8,  4); // arm
+      if (jumping) {
+        // Both legs slightly tucked
+        ctx.fillRect(x + 10, y + 38, 8, 6);
+        ctx.fillRect(x + 22, y + 38, 8, 6);
+      } else if (legF === 0) {
+        ctx.fillRect(x + 10, y + 38, 8, 10); // back leg extended
+        ctx.fillRect(x + 22, y + 38, 8,  4); // front leg short
+      } else {
+        ctx.fillRect(x + 10, y + 38, 8,  4); // back leg short
+        ctx.fillRect(x + 22, y + 38, 8, 10); // front leg extended
+      }
+      ctx.fillStyle = eyeBg;
+      ctx.fillRect(x + 30, y + 4, 5, 5); // eye
+      ctx.fillStyle = fg;
+    }
+  }
+
+  // ─── Main draw ───────────────────────────────────────────────────────────────
+  function draw() {
+    const C = colors();
+
+    // Background
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars (night only)
+    if (night) {
+      ctx.fillStyle = '#ffffff';
+      for (const s of stars) ctx.fillRect(s.x, s.y, 2, 2);
+    }
+
+    // Clouds
+    ctx.fillStyle = C.cloud;
+    for (const cl of clouds) {
+      ctx.beginPath();
+      ctx.ellipse(cl.x + cl.w / 2,       cl.y + cl.h / 2,       cl.w / 2,      cl.h / 2,      0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cl.x + cl.w * 0.32,    cl.y + cl.h * 0.3,     cl.w * 0.32,   cl.h * 0.45,   0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(cl.x + cl.w * 0.68,    cl.y + cl.h * 0.3,     cl.w * 0.28,   cl.h * 0.38,   0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Ground
+    ctx.fillStyle = C.fg;
+    ctx.fillRect(0, GROUND, W, 2);
+    for (const p of pebbles) ctx.fillRect(p.x, p.y, p.w, p.h);
+
+    // Obstacles
+    for (const obs of obstacles) drawObstacle(obs);
+
+    // Dino
+    drawDino(dino.x, dino.y, dino.ducking, dino.jumping, dino.legFrame, C.fg, C.eyeBg);
+
+    // Score — top right: "HI 00456  00123"
+    ctx.fillStyle = C.fg;
+    ctx.font = 'bold 20px "Courier New", Courier, monospace';
+    ctx.textAlign = 'right';
+    const scoreStr = String(Math.floor(score)).padStart(5, '0');
+    const hiStr    = 'HI ' + String(Math.floor(hiScore)).padStart(5, '0');
+    ctx.fillText(`${hiStr}  ${scoreStr}`, W - 16, 30);
+
+    // Overlay messages
+    ctx.textAlign = 'center';
+    if (state === 'idle') {
+      ctx.font = 'bold 22px "Courier New", Courier, monospace';
+      ctx.fillText('PRESS SPACE TO START', W / 2, H / 2 - 12);
+      ctx.font = '14px "Courier New", Courier, monospace';
+      ctx.fillText('or tap the screen on mobile', W / 2, H / 2 + 14);
+    } else if (state === 'gameover') {
+      ctx.font = 'bold 26px "Courier New", Courier, monospace';
+      ctx.fillText('GAME OVER', W / 2, H / 2 - 16);
+      ctx.font = '15px "Courier New", Courier, monospace';
+      ctx.fillText('PRESS SPACE or TAP to restart', W / 2, H / 2 + 14);
+    }
+  }
+
+  // ─── Game loop ───────────────────────────────────────────────────────────────
+  function loop(ts) {
+    const rawDt = lastTs ? ts - lastTs : FRAME;
+    // Normalize to 60fps frames; clamp to avoid spiral-of-death on tab switch
+    const dt    = Math.min(rawDt, FRAME * 3) / FRAME;
+    lastTs      = ts;
+
+    update(dt);
+    draw();
+
+    requestAnimationFrame(loop);
+  }
+
+  // ─── Init ────────────────────────────────────────────────────────────────────
+  spawnCloud();                    // place initial cloud
+  requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
