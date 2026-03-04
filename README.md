@@ -1,16 +1,22 @@
-# TouchFish Starter
+# Speech-to-Text Terminal Plugin
 
-A template repository for setting up your own [TouchFish Agent](https://github.com/LightOfTheLight/touchfish_agent) workflow. Fork this repo, configure one secret, and let AI agents handle your development tasks.
+A terminal plugin that captures speech from the microphone and outputs transcribed text directly in the terminal. Speak and it responds in the terminal.
 
-## What is TouchFish Agent?
+## Project Description
 
-TouchFish Agent is an AI-powered development workflow that uses Claude Code running in Docker containers, triggered by GitHub Actions. It provides three AI agents:
+Create a speech-to-text (STT) plugin for the terminal that:
+- Listens to the microphone input in real-time
+- Transcribes speech to text using an open-source NLP model that runs locally (no cloud APIs)
+- Displays the transcribed text in the terminal as you speak
+- Can be deployed and run entirely on a local machine without internet dependency
 
-| Agent | Role | Triggered by |
-|-------|------|--------------|
-| **PO** | Product Owner - analyzes requirements, maintains REQUIREMENT.md | `@PO` in commit message |
-| **DEV** | Developer - implements features and fixes based on requirements | `@DEV` in commit message |
-| **TESTER** | QA - creates and runs test cases based on requirements | `@TESTER` in commit message |
+## Requirements
+
+- Use an open-source STT model (e.g., OpenAI Whisper, Vosk, or similar) that can be self-hosted locally
+- Real-time or near-real-time transcription
+- Works as a terminal/CLI application
+- No external API calls for transcription - everything runs locally
+- Easy setup and deployment on local machines
 
 ## Quick Start
 
