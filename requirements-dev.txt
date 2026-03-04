@@ -1,0 +1,8 @@
+# Development / testing dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Test framework
+pytest>=7.0.0
+
+# Test coverage reporting
+pytest-cov>=4.0.0
