@@ -1,0 +1,19 @@
+# Speech-to-Text Terminal Plugin — Python dependencies
+#
+# Install with:
+#   pip install -r requirements.txt
+#
+# System prerequisite (Linux/macOS):
+#   Linux:  sudo apt install portaudio19-dev   (Debian/Ubuntu)
+#           sudo dnf install portaudio-devel    (Fedora/RHEL)
+#   macOS:  brew install portaudio
+#   Windows: portaudio is bundled with the sounddevice wheel
+
+# Local STT inference via Whisper (CPU-optimised CTranslate2 backend)
+faster-whisper>=1.0.0
+
+# Cross-platform audio capture
+sounddevice>=0.4.6
+
+# Numerical processing (transitive dep of faster-whisper, listed explicitly)
+numpy>=1.21.0
