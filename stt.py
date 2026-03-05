@@ -148,9 +148,14 @@ def run_claude(text: str) -> str:
             errors="replace",
             env=env,
         )
-        if result.returncode != 0 and result.stderr:
-            return f"[Claude error (exit {result.returncode})]: {result.stderr.strip()}"
-        return result.stdout.strip() or f"[Claude returned empty response (exit {result.returncode})]"
+        if result.returncode != 0:
+            parts = [f"[Claude error (exit {result.returncode})]"]
+            if result.stderr:
+                parts.append(result.stderr.strip())
+            if result.stdout:
+                parts.append(result.stdout.strip())
+            return ": ".join(parts)
+        return result.stdout.strip() or "[Claude returned empty response]"
     except subprocess.TimeoutExpired:
         return "[Claude timed out after 120 seconds]"
     except FileNotFoundError:
