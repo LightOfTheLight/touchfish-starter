@@ -1,0 +1,73 @@
+FAIL @DEV
+
+## Summary
+
+Static code analysis of `stt.py` against `REQUIREMENT.md` found **1 bug** that causes a
+requirement acceptance criterion to fail. 50 of 52 automated test cases are expected to pass;
+2 tests reproduce the bug below and will fail until it is fixed.
+
+---
+
+## Bug #1 — Minimum Speech Duration (Noise Rejection) is Broken
+
+**File:** `stt.py`
+**Line:** 238 — `if len(buffer) >= min_speech_chunks:`
+**Requirement:** Req 2.4 AC — "Utterances shorter than 0.3 seconds of speech are discarded (noise rejection)"
+
+### Root Cause
+
+`buffer` in `transcription_loop` accumulates both speech chunks AND trailing silence chunks.
+The end-of-utterance check fires only after `silence_chunk_count >= max_silence_chunks` (15 chunks
+= 1.0s of silence by default). At that point:
+
+    len(buffer) = speech_chunks + silence_chunks ≥ 1 + 15 = 16
+
+Since `min_speech_chunks = 4`, the check `len(buffer) >= min_speech_chunks` is ALWAYS True.
+No utterance is ever discarded as too short, regardless of actual speech duration.
+
+### Impact
+
+- Noise bursts and sub-300ms sounds are transcribed and (in `--agent` mode) sent to Claude.
+- The noise rejection feature specified in Req 2.4 does not function.
+
+### Fix Required (DEV)
+
+Track speech chunks in a dedicated counter (`speech_chunk_count`) and compare it—not
+`len(buffer)`—against `min_speech_chunks` when deciding whether to transcribe.
+
+```python
+speech_chunk_count = 0          # NEW: track speech only
+
+if rms > args.silence_threshold:
+    buffer.append(chunk)
+    silence_chunk_count = 0
+    in_speech = True
+    speech_chunk_count += 1     # NEW
+
+elif in_speech:
+    buffer.append(chunk)
+    silence_chunk_count += 1
+
+    if silence_chunk_count >= max_silence_chunks:
+        if speech_chunk_count >= min_speech_chunks:  # FIXED: use speech count
+            # transcribe ...
+        buffer.clear()
+        silence_chunk_count = 0
+        speech_chunk_count = 0  # NEW: reset
+        in_speech = False
+```
+
+### Reproducing the Bug
+
+The test class `TestMinSpeechDurationNoisRejection` in `tests/test_stt.py` reproduces the issue.
+Specifically:
+- `test_single_chunk_utterance_is_discarded` — expects False (discarded), gets True (bug)
+- `test_three_chunk_utterance_is_discarded`  — expects False (discarded), gets True (bug)
+
+---
+
+## All Other Requirements
+
+All other requirements and acceptance criteria are implemented correctly:
+- Argument parsing, device listing, model loading, Claude CLI integration, env sanitisation,
+  agent mode formatting, graceful shutdown, error messages — all verified PASS.
