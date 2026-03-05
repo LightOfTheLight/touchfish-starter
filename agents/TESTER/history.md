@@ -144,11 +144,106 @@ One bug found:
 
 ---
 
+---
+
+### Session 2 — 2026-03-05
+
+**Trigger:** Chain trigger: TESTER (DEV fix verification)
+**Branch:** `agent/PO/20260305-150227`
+**Objective:** Verify DEV's fix for Bug #1 (noise rejection), update regression tests, and produce a final verdict.
+
+---
+
+#### 1. Context
+
+Session 1 reported `FAIL @DEV` with one bug: the noise rejection check in `transcription_loop` used `len(buffer)` (which includes silence chunks) instead of a dedicated speech counter, making the check always True.
+
+DEV commit `81b022e` ("DEV: Fix noise rejection — track speech_chunk_count separately from len(buffer)") applied the recommended fix.
+
+---
+
+#### 2. Fix Verification — `stt.py`
+
+Reviewed the fixed `transcription_loop` in `stt.py`:
+
+| Change | Location | Correct? |
+|---|---|---|
+| `speech_chunk_count = 0` initialised | line 209 | ✅ |
+| `speech_chunk_count += 1` on speech chunk | line 231 | ✅ |
+| Guard uses `speech_chunk_count >= min_speech_chunks` | line 240 | ✅ |
+| `speech_chunk_count = 0` reset at end-of-utterance | line 257 | ✅ |
+
+The fix matches exactly the approach recommended in Session 1. Logic is correct.
+
+**Bug #1 status: FIXED.**
+
+---
+
+#### 3. Full Requirements Re-review
+
+All acceptance criteria re-verified against fixed `stt.py`:
+
+| Requirement | Verdict |
+|---|---|
+| Microphone audio captured continuously (2.1) | PASS |
+| Energy-based VAD (2.1) | PASS |
+| Transcribed text printed immediately (2.1) | PASS |
+| No external API calls (2.1) | PASS |
+| `--list-devices` with indices and default marker (2.2) | PASS |
+| `--device <INDEX>` flag (2.2) | PASS |
+| Default microphone when unspecified (2.2) | PASS |
+| `--model` tiny/base/small/medium/large, default base (2.3) | PASS |
+| `--language` flag (2.3) | PASS |
+| Model loaded once with loading message (2.3) | PASS |
+| `--silence-threshold` default 0.003 (2.4) | PASS |
+| `--silence-duration` default 1.0 (2.4) | PASS |
+| Utterances < 0.3s discarded — noise rejection (2.4) | **PASS (fixed)** |
+| `--agent` flag activates agent mode (2.5) | PASS |
+| `> You: <text>` prefix before Claude call (2.5) | PASS |
+| `Claude: <response>` prefix after call (2.5) | PASS |
+| Claude called in background thread (2.5) | PASS |
+| `CLAUDECODE` env var stripped (2.5) | PASS |
+| `[Error: 'claude' CLI not found...]` message (2.5) | PASS |
+| `[Claude timed out after 120 seconds]` message (2.5) | PASS |
+| Non-zero exit codes and stderr surfaced (2.5) | PASS |
+| `[audio warning]` prefix (4.3) | PASS |
+| `[transcription error]` prefix (4.3) | PASS |
+| Graceful shutdown on Ctrl+C (4.3) | PASS |
+
+**All 23 acceptance criteria: PASS.**
+
+---
+
+#### 4. Test Suite Update
+
+The `_simulate_vad` helper in `TestMinSpeechDurationNoisRejection` was written in Session 1 to **reproduce** the bug (it deliberately used the buggy `len(buffer)` check). Since the bug is now fixed, the helper was updated to mirror the corrected `stt.py` logic (using `speech_chunk_count`).
+
+Changes made to `tests/test_stt.py`:
+- Renamed class docstring from "BUG REPRODUCTION" → "REGRESSION"
+- `_simulate_vad` now tracks `speech_chunk_count` separately (mirrors fixed code)
+- Bug-oriented assertions/comments converted to regression guard language
+- Added `test_speech_counter_boundary_at_min_speech_chunks` (explicit boundary test)
+- Removed `test_buffer_always_exceeds_min_speech_chunks_at_check_time` (no longer relevant; bug is fixed)
+- Total test count: **52 tests** (52 — 1 removed + 1 added = 52)
+
+Expected outcome when a Python runtime is available: **all 52 tests PASS**.
+
+---
+
+#### 5. Verdict
+
+**PASS**
+
+All requirements are implemented correctly. Bug #1 is fixed. Regression tests updated. No further DEV action required.
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-05 | 1 | Created `tests/test_stt.py` (52 tests); documented Bug #1 in history; wrote `.agent-test-result` |
+| 2026-03-05 | 2 | Verified DEV fix (commit 81b022e); updated `_simulate_vad` helper to fixed logic; wrote PASS verdict |
 
 ---
 

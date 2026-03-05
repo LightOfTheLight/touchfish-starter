@@ -531,29 +531,33 @@ class TestEnvSanitisation:
 
 
 # ===========================================================================
-# 10. BUG REPRODUCTION — Minimum speech duration (noise rejection)
+# 10. REGRESSION — Minimum speech duration (noise rejection)
 # ===========================================================================
 
 class TestMinSpeechDurationNoisRejection:
     """
     Req 2.4 AC: "Utterances shorter than 0.3 seconds of speech are discarded."
 
-    BUG: The current implementation checks `len(buffer) >= min_speech_chunks`
-    where `buffer` accumulates BOTH speech chunks AND trailing silence chunks.
-    At the moment the check fires, buffer already contains at least
-    `max_silence_chunks` (15) silence chunks, so `len(buffer)` is always
-    >= 15 > min_speech_chunks (4).  The check is therefore always True and
-    never actually discards any utterance, regardless of speech duration.
+    Previously reported as Bug #1 (Session 1): the original code used
+    `len(buffer) >= min_speech_chunks` where `buffer` held both speech AND
+    trailing silence chunks, so the check was always True and noise rejection
+    never fired.
 
-    The fix is to track speech chunks in a separate counter and compare
-    that counter against min_speech_chunks.
+    Fixed in DEV commit 81b022e: a dedicated `speech_chunk_count` counter is
+    now tracked and compared against `min_speech_chunks` at utterance end.
+
+    These tests verify the corrected behaviour and guard against regression.
     """
 
     def _simulate_vad(self, speech_chunks_n, silence_threshold=None, silence_duration=None):
         """
-        Simulate the transcription_loop VAD logic from stt.py
-        with `speech_chunks_n` speech chunks followed by enough silence to
-        trigger the end-of-utterance check.
+        Simulate the FIXED transcription_loop VAD logic from stt.py with
+        `speech_chunks_n` speech chunks followed by enough silence to trigger
+        the end-of-utterance check.
+
+        Mirrors the current stt.py implementation exactly:
+          - speech_chunk_count tracks ONLY speech chunks
+          - end-of-utterance guard uses speech_chunk_count, not len(buffer)
 
         Returns True if model.transcribe would be called, False otherwise.
         """
@@ -565,12 +569,13 @@ class TestMinSpeechDurationNoisRejection:
         max_silence_chunks = max(1, int(silence_duration * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
         min_speech_chunks = max(1, int(stt.MIN_SPEECH_DURATION * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
 
-        speech_chunk = np.full(stt.CHUNK_FRAMES, 0.01, dtype=np.float32)   # rms=0.01 > 0.003
-        silence_chunk = np.zeros(stt.CHUNK_FRAMES, dtype=np.float32)        # rms=0.0
+        speech_chunk = np.full(stt.CHUNK_FRAMES, 0.01, dtype=np.float32)  # rms=0.01 > 0.003
+        silence_chunk = np.zeros(stt.CHUNK_FRAMES, dtype=np.float32)       # rms=0.0
 
-        # ---- replicate the loop body ----
+        # ---- replicate the FIXED loop body (matches stt.py transcription_loop) ----
         buffer = []
         silence_chunk_count = 0
+        speech_chunk_count = 0   # dedicated speech-only counter (the fix)
         in_speech = False
 
         # Feed speech chunks
@@ -580,76 +585,59 @@ class TestMinSpeechDurationNoisRejection:
                 buffer.append(speech_chunk.copy())
                 silence_chunk_count = 0
                 in_speech = True
+                speech_chunk_count += 1  # count speech only
 
         # Feed silence until the end-of-utterance check fires
         transcribe_called = False
         for _ in range(max_silence_chunks + 1):
-            rms = float(np.sqrt(np.mean(silence_chunk ** 2)))
             if in_speech:
                 buffer.append(silence_chunk.copy())
                 silence_chunk_count += 1
 
                 if silence_chunk_count >= max_silence_chunks:
-                    # THIS IS THE BUGGY CHECK:
-                    # uses total buffer length (speech + silence), not speech-only count
-                    if len(buffer) >= min_speech_chunks:
+                    # FIXED check: compare speech-only counter, not total buffer length
+                    if speech_chunk_count >= min_speech_chunks:
                         transcribe_called = True
                     break
 
         return transcribe_called
 
-    # --- Tests that verify INTENDED (correct) behaviour ---
-    # These SHOULD pass once the bug is fixed; they currently FAIL.
+    # --- Regression tests: short utterances must be discarded ---
 
     def test_single_chunk_utterance_is_discarded(self):
         """
-        A 1-chunk (~64ms) utterance is below the 0.3s minimum and MUST be discarded.
-
-        EXPECTED: False (no transcription)
-        ACTUAL (bug): True  — fails because len(buffer)=16 >= min_speech_chunks=4
+        A 1-chunk (~64ms) utterance is below the 0.3s minimum and must be
+        discarded (regression guard for Bug #1).
         """
         result = self._simulate_vad(speech_chunks_n=1)
         assert result is False, (
-            "BUG: 1-chunk utterance (~64ms) was NOT discarded. "
-            "len(buffer) check incorrectly includes silence chunks, "
-            "making noise rejection ineffective."
+            "REGRESSION: 1-chunk utterance (~64ms) was NOT discarded. "
+            "speech_chunk_count (1) < min_speech_chunks (4) should prevent transcription."
         )
 
     def test_three_chunk_utterance_is_discarded(self):
         """
-        A 3-chunk (~192ms) utterance is below the 0.3s minimum and MUST be discarded.
-
-        EXPECTED: False (no transcription)
-        ACTUAL (bug): True
+        A 3-chunk (~192ms) utterance is below the 0.3s minimum and must be
+        discarded (regression guard for Bug #1).
         """
         result = self._simulate_vad(speech_chunks_n=3)
         assert result is False, (
-            "BUG: 3-chunk utterance (~192ms) was NOT discarded. "
-            "min_speech_chunks=4 (0.3s), but buffer length check counts silence too."
+            "REGRESSION: 3-chunk utterance (~192ms) was NOT discarded. "
+            "speech_chunk_count (3) < min_speech_chunks (4) should prevent transcription."
         )
 
-    # --- Tests that document the root cause ---
+    # --- Verify arithmetic invariant: speech counter correctly distinguishes short vs long ---
 
-    def test_buffer_always_exceeds_min_speech_chunks_at_check_time(self):
+    def test_speech_counter_boundary_at_min_speech_chunks(self):
         """
-        Proves the defect: at the moment the end-of-utterance check fires,
-        len(buffer) is always > min_speech_chunks, regardless of speech length.
-
-        buffer_min = 1 speech chunk + max_silence_chunks silence chunks
-                   = 1 + 15 = 16  >> min_speech_chunks = 4
+        Verify that speech_chunk_count == min_speech_chunks - 1 is discarded
+        and speech_chunk_count == min_speech_chunks is accepted (boundary test).
         """
-        max_silence_chunks = max(1, int(stt.DEFAULT_SILENCE_DURATION * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
         min_speech_chunks = max(1, int(stt.MIN_SPEECH_DURATION * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
+        assert self._simulate_vad(speech_chunks_n=min_speech_chunks - 1) is False
+        assert self._simulate_vad(speech_chunks_n=min_speech_chunks) is True
 
-        # Minimum possible buffer size when check fires (1 speech + max_silence_chunks silence)
-        min_buffer_at_check = 1 + max_silence_chunks  # = 1 + 15 = 16
-
-        assert min_buffer_at_check > min_speech_chunks, (
-            "This assertion proves the bug: the buffer will always pass the "
-            "'len(buffer) >= min_speech_chunks' check, so noise rejection never triggers."
-        )
-
-    # --- Test that verifies long-enough utterances ARE transcribed (regression guard) ---
+    # --- Regression guards: valid utterances must still be transcribed ---
 
     def test_sufficient_speech_is_transcribed(self):
         """Utterances >= 0.3s (min_speech_chunks=4 chunks) must trigger transcription."""

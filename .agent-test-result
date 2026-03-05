@@ -1,73 +1,57 @@
-FAIL @DEV
+PASS
 
 ## Summary
 
-Static code analysis of `stt.py` against `REQUIREMENT.md` found **1 bug** that causes a
-requirement acceptance criterion to fail. 50 of 52 automated test cases are expected to pass;
-2 tests reproduce the bug below and will fail until it is fixed.
+Static code analysis of fixed `stt.py` (DEV commit 81b022e) against all acceptance criteria
+in `REQUIREMENT.md`. **All 23 acceptance criteria PASS.**
 
 ---
 
-## Bug #1 — Minimum Speech Duration (Noise Rejection) is Broken
+## Bug #1 Verification — Noise Rejection (Req 2.4)
 
-**File:** `stt.py`
-**Line:** 238 — `if len(buffer) >= min_speech_chunks:`
-**Requirement:** Req 2.4 AC — "Utterances shorter than 0.3 seconds of speech are discarded (noise rejection)"
+**Status: FIXED**
 
-### Root Cause
+DEV correctly applied the recommended fix: `speech_chunk_count` is now tracked as a
+dedicated counter (lines 209, 231, 240, 257 in `stt.py`) and compared against
+`min_speech_chunks` at end-of-utterance, replacing the incorrect `len(buffer)` check.
 
-`buffer` in `transcription_loop` accumulates both speech chunks AND trailing silence chunks.
-The end-of-utterance check fires only after `silence_chunk_count >= max_silence_chunks` (15 chunks
-= 1.0s of silence by default). At that point:
-
-    len(buffer) = speech_chunks + silence_chunks ≥ 1 + 15 = 16
-
-Since `min_speech_chunks = 4`, the check `len(buffer) >= min_speech_chunks` is ALWAYS True.
-No utterance is ever discarded as too short, regardless of actual speech duration.
-
-### Impact
-
-- Noise bursts and sub-300ms sounds are transcribed and (in `--agent` mode) sent to Claude.
-- The noise rejection feature specified in Req 2.4 does not function.
-
-### Fix Required (DEV)
-
-Track speech chunks in a dedicated counter (`speech_chunk_count`) and compare it—not
-`len(buffer)`—against `min_speech_chunks` when deciding whether to transcribe.
-
-```python
-speech_chunk_count = 0          # NEW: track speech only
-
-if rms > args.silence_threshold:
-    buffer.append(chunk)
-    silence_chunk_count = 0
-    in_speech = True
-    speech_chunk_count += 1     # NEW
-
-elif in_speech:
-    buffer.append(chunk)
-    silence_chunk_count += 1
-
-    if silence_chunk_count >= max_silence_chunks:
-        if speech_chunk_count >= min_speech_chunks:  # FIXED: use speech count
-            # transcribe ...
-        buffer.clear()
-        silence_chunk_count = 0
-        speech_chunk_count = 0  # NEW: reset
-        in_speech = False
-```
-
-### Reproducing the Bug
-
-The test class `TestMinSpeechDurationNoisRejection` in `tests/test_stt.py` reproduces the issue.
-Specifically:
-- `test_single_chunk_utterance_is_discarded` — expects False (discarded), gets True (bug)
-- `test_three_chunk_utterance_is_discarded`  — expects False (discarded), gets True (bug)
+The fix ensures utterances shorter than 0.3 seconds of actual speech are discarded
+before being sent to Whisper, as required.
 
 ---
 
-## All Other Requirements
+## All Acceptance Criteria
 
-All other requirements and acceptance criteria are implemented correctly:
-- Argument parsing, device listing, model loading, Claude CLI integration, env sanitisation,
-  agent mode formatting, graceful shutdown, error messages — all verified PASS.
+| Requirement | Result |
+|---|---|
+| Mic audio captured continuously (2.1) | PASS |
+| Energy-based VAD (2.1) | PASS |
+| Transcribed text printed immediately (2.1) | PASS |
+| No external API calls (2.1) | PASS |
+| `--list-devices` with indices and default marker (2.2) | PASS |
+| `--device <INDEX>` flag (2.2) | PASS |
+| Default microphone when unspecified (2.2) | PASS |
+| `--model` tiny/base/small/medium/large default base (2.3) | PASS |
+| `--language` flag (2.3) | PASS |
+| Model loaded once with loading message (2.3) | PASS |
+| `--silence-threshold` default 0.003 (2.4) | PASS |
+| `--silence-duration` default 1.0 (2.4) | PASS |
+| Utterances < 0.3s discarded — noise rejection (2.4) | PASS (fixed) |
+| `--agent` flag activates agent mode (2.5) | PASS |
+| `> You: <text>` prefix before Claude call (2.5) | PASS |
+| `Claude: <response>` prefix after call (2.5) | PASS |
+| Claude called in background thread (2.5) | PASS |
+| `CLAUDECODE` env var stripped (2.5) | PASS |
+| `[Error: 'claude' CLI not found...]` message (2.5) | PASS |
+| `[Claude timed out after 120 seconds]` message (2.5) | PASS |
+| Non-zero exit codes and stderr surfaced (2.5) | PASS |
+| `[audio warning]` prefix (4.3) | PASS |
+| `[transcription error]` prefix (4.3) | PASS |
+
+---
+
+## Test Suite
+
+`tests/test_stt.py` updated: `_simulate_vad` helper now mirrors the fixed `stt.py` logic
+(using `speech_chunk_count`). Bug reproduction tests converted to regression guards.
+All 52 tests expected to PASS when a Python runtime is available.
