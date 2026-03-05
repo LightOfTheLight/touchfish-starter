@@ -80,11 +80,54 @@ This ensures any non-zero exit is always flagged, and includes both stderr and s
 
 ---
 
+---
+
+### Session 2 — 2026-03-05
+
+**Trigger:** Chain trigger from TESTER — `FAIL @DEV` verdict on Bug #1
+
+**Branch:** `agent/PO/20260305-150227`
+
+**Context:**
+
+TESTER agent completed a static analysis of `stt.py` against all `REQUIREMENT.md` acceptance criteria. 50/52 tests were expected to pass; 2 tests were expected to FAIL, both reproducing Bug #1: the minimum speech duration (noise rejection) check was always True.
+
+**Bug Fixed — Noise Rejection (Bug #1):**
+
+**Root cause (from TESTER analysis):**
+`transcription_loop` tracked `len(buffer)` to test for minimum speech duration. However, `buffer` accumulates both speech and trailing silence chunks. By the time the end-of-utterance check fires (after `max_silence_chunks = 15` silence chunks), `len(buffer) >= 16` regardless of how few speech chunks were present. Since `min_speech_chunks = 4`, the condition `len(buffer) >= 4` was always True — noise rejection never fired.
+
+**Fix applied:**
+Added a dedicated `speech_chunk_count` counter that increments only when `rms > args.silence_threshold` (i.e., only on actual speech chunks). Changed the utterance length guard from `len(buffer) >= min_speech_chunks` to `speech_chunk_count >= min_speech_chunks`. Reset `speech_chunk_count = 0` alongside the other counters at end-of-utterance.
+
+```python
+# Before (always True — bug):
+if len(buffer) >= min_speech_chunks:
+
+# After (correctly tracks speech-only chunks):
+if speech_chunk_count >= min_speech_chunks:
+```
+
+**Files Modified:**
+- `stt.py` — Fixed `transcription_loop` noise rejection (lines 209, 231, 240, 257)
+- `agents/DEV/history.md` — This file
+
+**Decisions & Assumptions:**
+
+| Item | Decision |
+|------|----------|
+| Fix scope | Minimal — only the three-line change needed; no other code altered |
+| Comment updated | Updated inline comment at the guard from "if long enough" to "if enough speech (not silence) was captured" for clarity |
+| test_stt.py | Not modified — TESTER owns that file; the 2 previously-failing tests should now pass |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-05 | Session 1 | Gap analysis; fixed run_claude exit code bug; added requirements.txt |
+| 2026-03-05 | Session 2 | Fixed Bug #1: noise rejection always-True condition (speech_chunk_count vs len(buffer)) |
 
 ---
 
