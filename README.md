@@ -9,6 +9,7 @@ Create a speech-to-text (STT) plugin for the terminal that:
 - Transcribes speech to text using an open-source NLP model that runs locally (no cloud APIs)
 - Displays the transcribed text in the terminal as you speak
 - Can be deployed and run entirely on a local machine without internet dependency
+- **Voice-controlled Claude Code (`--agent` mode):** Transcribed speech is piped to `claude -p` so users can voice-control coding tasks hands-free
 
 ## Requirements
 
@@ -17,6 +18,19 @@ Create a speech-to-text (STT) plugin for the terminal that:
 - Works as a terminal/CLI application
 - No external API calls for transcription - everything runs locally
 - Easy setup and deployment on local machines
+
+### Agent Mode Requirements
+
+- `--agent` flag enables voice-to-Claude pipeline: each transcribed utterance is sent to `claude -p "<text>"` and the response is printed in the terminal
+- Audio capture must continue while Claude is processing (non-blocking)
+- Output format: `> You: <transcribed text>` followed by `Claude: <response>`
+- **Response time:** End-to-end latency from end-of-speech to start of Claude's response displayed in terminal should be under 10 seconds for typical short commands (excluding network/model variability). The STT transcription step itself should complete within 2 seconds of silence detection.
+- Graceful error handling: timeout (120s), missing CLI, subprocess failures — all surfaced to the user
+- Must strip the `CLAUDECODE` environment variable when spawning `claude -p` subprocess to avoid "nested session" errors when launched from within an existing Claude Code session
+
+### Known Issues & Fixes
+
+- **CLAUDECODE env var conflict:** When `stt.py --agent` is launched from within a Claude Code session, the `CLAUDECODE` environment variable is inherited by the subprocess. Claude Code detects this and refuses to start ("cannot be launched inside another Claude Code session"). The fix is to remove this env var from the subprocess environment.
 
 ## Quick Start
 
