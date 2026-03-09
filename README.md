@@ -28,9 +28,29 @@ Create a speech-to-text (STT) plugin for the terminal that:
 - Graceful error handling: timeout (120s), missing CLI, subprocess failures — all surfaced to the user
 - Must strip the `CLAUDECODE` environment variable when spawning `claude -p` subprocess to avoid "nested session" errors when launched from within an existing Claude Code session
 
+### Debug Mode Requirements
+
+- `--debug` flag enables verbose diagnostic logging to stderr (does not interfere with normal stdout output)
+- Debug output must include:
+  - **Startup info:** model name, language, agent mode, silence threshold, silence duration — printed immediately on launch to confirm debug is active
+  - **Audio levels:** periodic RMS level logging (e.g. every 2-3 seconds) so users can verify the mic is capturing audio and tune the silence threshold
+  - **Speech detection:** log when speech starts (with RMS value) and when silence is detected (with utterance duration)
+  - **Transcription timing:** log how long Whisper transcription takes and the resulting text
+  - **Claude call timing:** log when the Claude subprocess starts, finishes, and how long it took
+- All debug lines must be timestamped with format `[DEBUG HH:MM:SS] <message>`
+- Debug mode must work with all combinations of flags (--agent, --model, etc.)
+
+### Transcription Accuracy Requirements
+
+- The default model ("base") is insufficient for reliable voice commands. The tool should recommend or default to "small" model for agent mode, as it offers a better accuracy/speed tradeoff on CPU.
+- When `--agent` is used without explicit `--model`, default to "small" instead of "base" for better accuracy
+- Transcription must handle common English commands accurately: file operations, code-related terms, technical vocabulary
+- With "medium" or "large" models, transcription must still complete within a reasonable time. If it exceeds 5 seconds, log a warning suggesting a smaller model
+
 ### Known Issues & Fixes
 
 - **CLAUDECODE env var conflict:** When `stt.py --agent` is launched from within a Claude Code session, the `CLAUDECODE` environment variable is inherited by the subprocess. Claude Code detects this and refuses to start ("cannot be launched inside another Claude Code session"). The fix is to remove this env var from the subprocess environment.
+- **Medium/large model performance:** On CPU, medium and large models can be very slow (10+ seconds per utterance), causing the tool to appear frozen. Debug mode is essential for diagnosing this. Consider warning users at startup if a heavy model is selected without GPU.
 
 ## Quick Start
 
