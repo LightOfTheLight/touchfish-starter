@@ -12,7 +12,9 @@ Covers:
   7. VAD/audio-processing constants and logic
   8. Agent mode output formatting
   9. Environment variable sanitisation (security)
-  10. Minimum-speech-duration noise-rejection logic (BUG REPRODUCTION)
+  10. Minimum-speech-duration noise-rejection logic (REGRESSION)
+  11. Debug mode — Req 2.5
+  12. Transcription accuracy / model defaults — Req 2.6
 """
 
 import argparse
@@ -44,6 +46,7 @@ def make_args(**kwargs):
         "silence_threshold": stt.DEFAULT_SILENCE_THRESHOLD,
         "silence_duration": stt.DEFAULT_SILENCE_DURATION,
         "agent": False,
+        "debug": False,  # Req 2.5: --debug flag; must be present for run() to access args.debug
     }
     defaults.update(kwargs)
     return argparse.Namespace(**defaults)
@@ -65,9 +68,11 @@ def _mock_fw(model_instance=None):
 class TestParseArgs:
     """Req 2.2, 2.3, 2.4, 2.5 — CLI argument contract."""
 
-    def test_default_model_is_base(self):
+    def test_default_model_is_none_when_unspecified(self):
+        # Req 2.6: --model default is None so main() can pick the mode-appropriate default.
+        # parse_args() must not hard-code "base"; the effective default is resolved by main().
         with patch("sys.argv", ["stt.py"]):
-            assert stt.parse_args().model == "base"
+            assert stt.parse_args().model is None
 
     def test_default_language_is_none(self):
         with patch("sys.argv", ["stt.py"]):
@@ -126,6 +131,16 @@ class TestParseArgs:
     def test_agent_flag(self):
         with patch("sys.argv", ["stt.py", "--agent"]):
             assert stt.parse_args().agent is True
+
+    def test_default_debug_is_false(self):
+        # Req 2.5: --debug is opt-in; must default to False
+        with patch("sys.argv", ["stt.py"]):
+            assert stt.parse_args().debug is False
+
+    def test_debug_flag(self):
+        # Req 2.5: --debug activates debug mode
+        with patch("sys.argv", ["stt.py", "--debug"]):
+            assert stt.parse_args().debug is True
 
 
 # ===========================================================================
@@ -241,6 +256,30 @@ class TestLoadModel:
             with pytest.raises(SystemExit):
                 stt.load_model("medium")
         assert "medium" in capsys.readouterr().out
+
+    def test_prints_warning_for_medium_model_cpu_latency(self, capsys):
+        # Req 2.6: medium on CPU → latency warning printed at startup
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("medium")
+        assert "[warning]" in capsys.readouterr().out
+
+    def test_prints_warning_for_large_model_cpu_latency(self, capsys):
+        # Req 2.6: large on CPU → latency warning printed at startup
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("large")
+        assert "[warning]" in capsys.readouterr().out
+
+    def test_no_warning_for_base_model(self, capsys):
+        # Req 2.6: base does not trigger CPU latency warning
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("base")
+        assert "[warning]" not in capsys.readouterr().out
+
+    def test_no_warning_for_small_model(self, capsys):
+        # Req 2.6: small does not trigger CPU latency warning
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("small")
+        assert "[warning]" not in capsys.readouterr().out
 
 
 # ===========================================================================
@@ -368,6 +407,32 @@ class TestMain:
              patch("stt.run") as mock_run:
             stt.main()
         mock_run.assert_called_once()
+
+    def test_main_sets_base_model_by_default_in_basic_mode(self):
+        # Req 2.6: basic mode without --model → effective model is DEFAULT_MODEL ("base")
+        with patch("sys.argv", ["stt.py"]), patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == stt.DEFAULT_MODEL
+
+    def test_main_sets_small_model_by_default_in_agent_mode(self):
+        # Req 2.6: --agent without --model → effective model is DEFAULT_AGENT_MODEL ("small")
+        with patch("sys.argv", ["stt.py", "--agent"]), patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == stt.DEFAULT_AGENT_MODEL
+
+    def test_main_respects_explicit_model_in_agent_mode(self):
+        # Req 2.6: explicit --model always wins over mode default
+        with patch("sys.argv", ["stt.py", "--agent", "--model", "tiny"]), \
+             patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "tiny"
+
+    def test_main_respects_explicit_model_in_basic_mode(self):
+        # Req 2.6: explicit --model in basic mode always wins over DEFAULT_MODEL
+        with patch("sys.argv", ["stt.py", "--model", "medium"]), \
+             patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "medium"
 
 
 # ===========================================================================
@@ -648,3 +713,183 @@ class TestMinSpeechDurationNoisRejection:
         """Clearly long utterances (32 speech chunks) must always be transcribed."""
         result = self._simulate_vad(speech_chunks_n=32)
         assert result is True, "A 32-chunk utterance should definitely be transcribed."
+
+
+# ===========================================================================
+# 11. Debug Mode — Req 2.5
+# ===========================================================================
+
+class TestDebugMode:
+    """Req 2.5 — --debug flag enables verbose timestamped diagnostic output to stderr."""
+
+    # -----------------------------------------------------------------------
+    # debug_log() helper function
+    # -----------------------------------------------------------------------
+
+    def test_debug_log_writes_to_stderr(self, capsys):
+        """Req 2.5: All debug output goes to stderr only."""
+        stt.debug_log("test message")
+        assert "test message" in capsys.readouterr().err
+
+    def test_debug_log_nothing_on_stdout(self, capsys):
+        """Req 2.5: stdout must be unchanged by debug output."""
+        stt.debug_log("test message")
+        assert "test message" not in capsys.readouterr().out
+
+    def test_debug_log_format_has_debug_prefix(self, capsys):
+        """Req 2.5: Debug lines contain [DEBUG prefix."""
+        stt.debug_log("hello")
+        assert "[DEBUG " in capsys.readouterr().err
+
+    def test_debug_log_format_has_timestamp(self, capsys):
+        """Req 2.5: Debug lines are timestamped with [DEBUG HH:MM:SS] format."""
+        import re
+        stt.debug_log("hello")
+        err = capsys.readouterr().err
+        assert re.search(r'\[DEBUG \d{2}:\d{2}:\d{2}\]', err), (
+            f"Expected [DEBUG HH:MM:SS] format, got: {err!r}"
+        )
+
+    # -----------------------------------------------------------------------
+    # Module-level debug constants
+    # -----------------------------------------------------------------------
+
+    def test_rms_log_interval_is_between_2_and_3_seconds(self):
+        """Req 2.5: RMS level logged 'every 2-3 seconds' — constant must be in range."""
+        assert 2.0 <= stt.RMS_LOG_INTERVAL_SECS <= 3.0
+
+    # -----------------------------------------------------------------------
+    # Startup debug output inside run()
+    # -----------------------------------------------------------------------
+
+    def _run_with_debug(self, capsys, **kwargs):
+        """Run stt.run() with --debug and mocked hardware; return captured stderr."""
+        args = make_args(debug=True, **kwargs)
+        with patch("stt.load_model", return_value=MagicMock()), \
+             patch("stt.sd.InputStream", side_effect=stt.sd.PortAudioError("mock")):
+            with pytest.raises(SystemExit):
+                stt.run(args)
+        return capsys.readouterr().err
+
+    def test_debug_startup_logs_model_name(self, capsys):
+        """Req 2.5: On startup, debug mode logs the model name."""
+        err = self._run_with_debug(capsys, model="tiny")
+        assert "tiny" in err
+
+    def test_debug_startup_logs_language(self, capsys):
+        """Req 2.5: On startup, debug mode logs the language setting."""
+        err = self._run_with_debug(capsys, language="fr")
+        assert "fr" in err
+
+    def test_debug_startup_logs_agent_mode_status(self, capsys):
+        """Req 2.5: On startup, debug mode logs agent mode status."""
+        err = self._run_with_debug(capsys, agent=True)
+        assert "True" in err
+
+    def test_debug_startup_logs_silence_threshold(self, capsys):
+        """Req 2.5: On startup, debug mode logs the silence threshold."""
+        err = self._run_with_debug(capsys, silence_threshold=0.007)
+        assert "0.007" in err
+
+    def test_debug_startup_logs_silence_duration(self, capsys):
+        """Req 2.5: On startup, debug mode logs the silence duration."""
+        err = self._run_with_debug(capsys, silence_duration=1.5)
+        assert "1.5" in err
+
+    def test_no_debug_output_without_flag(self, capsys):
+        """Req 2.5: Without --debug, no [DEBUG lines appear on stderr."""
+        args = make_args(debug=False)
+        with patch("stt.load_model", return_value=MagicMock()), \
+             patch("stt.sd.InputStream", side_effect=stt.sd.PortAudioError("mock")):
+            with pytest.raises(SystemExit):
+                stt.run(args)
+        err = capsys.readouterr().err
+        assert "[DEBUG" not in err
+
+
+# ===========================================================================
+# 12. Transcription Accuracy / Model Defaults — Req 2.6
+# ===========================================================================
+
+class TestTranscriptionAccuracy:
+    """Req 2.6 — Agent mode defaults to 'small' model; medium/large CPU warnings;
+    slow transcription warning."""
+
+    # -----------------------------------------------------------------------
+    # Module-level constants
+    # -----------------------------------------------------------------------
+
+    def test_default_agent_model_constant_is_small(self):
+        """Req 2.6: DEFAULT_AGENT_MODEL must equal 'small'."""
+        assert stt.DEFAULT_AGENT_MODEL == "small"
+
+    def test_slow_transcription_secs_constant_is_5(self):
+        """Req 2.6: Slow transcription threshold must be 5.0 seconds."""
+        assert stt.SLOW_TRANSCRIPTION_SECS == pytest.approx(5.0)
+
+    # -----------------------------------------------------------------------
+    # parse_args: --model is None when unspecified (effective default deferred to main)
+    # -----------------------------------------------------------------------
+
+    def test_parse_args_model_is_none_when_flag_absent(self):
+        """Req 2.6: parse_args() must not hard-code 'base'; model=None lets main() decide."""
+        with patch("sys.argv", ["stt.py"]):
+            assert stt.parse_args().model is None
+
+    # -----------------------------------------------------------------------
+    # main(): effective model assignment
+    # -----------------------------------------------------------------------
+
+    def test_main_effective_model_is_base_in_basic_mode(self):
+        """Req 2.6: No --agent, no --model → effective model is 'base'."""
+        with patch("sys.argv", ["stt.py"]), patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "base"
+
+    def test_main_effective_model_is_small_in_agent_mode(self):
+        """Req 2.6: --agent without --model → effective model is 'small' for better accuracy."""
+        with patch("sys.argv", ["stt.py", "--agent"]), patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "small"
+
+    def test_explicit_model_overrides_agent_default(self):
+        """Req 2.6: When --model is specified, it is used regardless of mode."""
+        with patch("sys.argv", ["stt.py", "--agent", "--model", "tiny"]), \
+             patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "tiny"
+
+    def test_explicit_model_overrides_basic_default(self):
+        """Req 2.6: Explicit --model in basic mode overrides DEFAULT_MODEL."""
+        with patch("sys.argv", ["stt.py", "--model", "large"]), \
+             patch("stt.run") as mock_run:
+            stt.main()
+        assert mock_run.call_args[0][0].model == "large"
+
+    # -----------------------------------------------------------------------
+    # load_model: medium/large CPU latency warning
+    # -----------------------------------------------------------------------
+
+    def test_load_model_warns_medium_on_cpu(self, capsys):
+        """Req 2.6: 'medium' model triggers a CPU latency warning at startup."""
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("medium")
+        assert "[warning]" in capsys.readouterr().out
+
+    def test_load_model_warns_large_on_cpu(self, capsys):
+        """Req 2.6: 'large' model triggers a CPU latency warning at startup."""
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("large")
+        assert "[warning]" in capsys.readouterr().out
+
+    def test_load_model_no_warning_for_base(self, capsys):
+        """Req 2.6: 'base' model must NOT trigger a CPU latency warning."""
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("base")
+        assert "[warning]" not in capsys.readouterr().out
+
+    def test_load_model_no_warning_for_small(self, capsys):
+        """Req 2.6: 'small' model must NOT trigger a CPU latency warning."""
+        with patch.dict("sys.modules", {"faster_whisper": _mock_fw()}):
+            stt.load_model("small")
+        assert "[warning]" not in capsys.readouterr().out
