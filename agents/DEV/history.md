@@ -122,12 +122,95 @@ if speech_chunk_count >= min_speech_chunks:
 
 ---
 
+---
+
+### Session 3 — 2026-03-09
+
+**Trigger:** Chain trigger from PO — new requirements added in commit `90198ab` ("PO: Add Debug Mode and Transcription Accuracy requirements")
+
+**Branch:** `agent/PO/20260309-121445`
+
+**Context:**
+
+PO agent added two new requirement sections to `REQUIREMENT.md`:
+- **2.5 Debug Mode** — `--debug` flag with verbose timestamped diagnostic output to stderr
+- **2.6 Transcription Accuracy** — Agent mode defaults to `small` model; medium/large CPU warnings; slow transcription warning
+
+**Gap Analysis:**
+
+| Requirement | Prior Status | Action Taken |
+|-------------|-------------|--------------|
+| 2.5 `--debug` flag | ❌ Missing | Added to argparse |
+| 2.5 Debug output to stderr only | ❌ Missing | `debug_log()` writes to `sys.stderr` |
+| 2.5 Timestamped `[DEBUG HH:MM:SS]` format | ❌ Missing | `debug_log()` uses `time.strftime("%H:%M:%S")` |
+| 2.5 Startup: model, language, agent mode, thresholds | ❌ Missing | Added at top of `run()` |
+| 2.5 Periodic RMS logging (~2-3s interval) | ❌ Missing | `last_rms_log_time` tracking in `transcription_loop()` |
+| 2.5 Speech start log with RMS | ❌ Missing | Logged on `in_speech` transition |
+| 2.5 Silence detected log with utterance duration | ❌ Missing | `utterance_start_time` tracked; logged at end-of-utterance |
+| 2.5 Transcription timing logged | ❌ Missing | `t_transcribe` timer; logged after `model.transcribe()` |
+| 2.5 Claude start/finish/elapsed logged | ❌ Missing | Added to `_call_claude()` in `handle_transcription()` |
+| 2.6 Agent mode default `small` | ❌ Missing | `--model` default changed to `None`; `main()` sets effective default |
+| 2.6 Explicit `--model` overrides mode default | ✅ Now correct | `args.model is None` check in `main()` |
+| 2.6 Medium/large CPU latency warning at startup | ❌ Missing | Added to `load_model()` |
+| 2.6 Slow transcription warning (>5s) | ❌ Missing | `SLOW_TRANSCRIPTION_SECS = 5.0`; logged after transcription |
+
+**Implementation Details:**
+
+**`--model` default handling:**
+
+Changed from `default=DEFAULT_MODEL` (always `"base"`) to `default=None`. In `main()`, after `parse_args()`:
+```python
+if args.model is None:
+    args.model = DEFAULT_AGENT_MODEL if args.agent else DEFAULT_MODEL
+```
+This correctly handles all three cases: no flag (mode-appropriate default), explicit flag (always honoured), agent flag without model flag (defaults to `small`).
+
+**`debug_log()` function:**
+```python
+def debug_log(message: str) -> None:
+    ts = time.strftime("%H:%M:%S")
+    sys.stderr.write(f"[DEBUG {ts}] {message}\n")
+    sys.stderr.flush()
+```
+Module-level helper. All call sites guard with `if args.debug:` (available via closure or local scope), so the function itself doesn't need the flag.
+
+**Periodic RMS logging:**
+Used `last_rms_log_time` float (initialized to `0.0`) compared against `time.time()` with a `RMS_LOG_INTERVAL_SECS = 2.5` threshold. Logged unconditionally each interval (regardless of speech/silence state) to help with threshold tuning.
+
+**Utterance duration tracking:**
+Added `utterance_start_time: Optional[float] = None` to `transcription_loop()`. Set on the `not in_speech → in_speech` transition, reset to `None` at end-of-utterance cleanup.
+
+**Claude timing:**
+Moved inside `_call_claude()` closure which already has access to `args` via closure. Start/finish debug lines added with `time.time()` elapsed.
+
+**New Constants:**
+- `DEFAULT_AGENT_MODEL = "small"`
+- `SLOW_TRANSCRIPTION_SECS = 5.0`
+- `RMS_LOG_INTERVAL_SECS = 2.5`
+
+**Files Modified:**
+- `stt.py` — Implemented all new requirements (debug mode, model defaults, warnings)
+- `agents/DEV/history.md` — This file
+
+**Decisions & Assumptions:**
+
+| Item | Decision |
+|------|----------|
+| Slow transcription warning | Goes to stdout (print) not debug stderr — it's a user-facing operational warning, not a debug diagnostic |
+| Medium/large warning | Printed unconditionally (not gated on --debug) per requirement: "a warning is printed" |
+| RMS interval | 2.5s (midpoint of 2–3s range specified in requirement) |
+| debug_log prompt truncation | Full prompt logged in `_call_claude` debug line — short commands are typical; no truncation needed |
+| list_devices order | List-devices check kept before model assignment in `main()` — device listing doesn't need a model |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-05 | Session 1 | Gap analysis; fixed run_claude exit code bug; added requirements.txt |
 | 2026-03-05 | Session 2 | Fixed Bug #1: noise rejection always-True condition (speech_chunk_count vs len(buffer)) |
+| 2026-03-09 | Session 3 | Implemented Debug Mode (Req 2.5) and Transcription Accuracy (Req 2.6) |
 
 ---
 

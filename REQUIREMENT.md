@@ -45,7 +45,8 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 **Description:** Support multiple Whisper model sizes to let users trade off speed vs. accuracy.
 
 **Acceptance Criteria:**
-- [ ] `--model` accepts: `tiny`, `base`, `small`, `medium`, `large` (default: `base`)
+- [ ] `--model` accepts: `tiny`, `base`, `small`, `medium`, `large`
+- [ ] Default model is `base` in basic mode; `small` in agent mode (when `--model` is not explicitly specified)
 - [ ] `--language <LANG>` allows forcing a language code (e.g., `en`, `fr`); auto-detects when omitted
 - [ ] Model is loaded once at startup; a loading message is printed to inform the user
 
@@ -58,7 +59,34 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 - [ ] `--silence-duration <SECS>` sets how long silence must persist before triggering transcription (default: `1.0`)
 - [ ] Utterances shorter than 0.3 seconds of speech are discarded (noise rejection)
 
-### 2.5 Voice-Controlled Claude Code Agent Mode
+### 2.5 Debug Mode
+
+**Description:** A `--debug` flag that enables verbose diagnostic logging to stderr, allowing users to diagnose microphone levels, VAD behavior, transcription timing, and Claude subprocess performance without interfering with normal stdout output.
+
+**Acceptance Criteria:**
+- [ ] `--debug` flag activates debug mode
+- [ ] All debug output goes to **stderr** only — stdout output is unchanged
+- [ ] All debug lines are timestamped with format `[DEBUG HH:MM:SS] <message>`
+- [ ] On startup, debug mode prints: model name, language, agent mode status, silence threshold, silence duration
+- [ ] During capture, RMS audio level is logged periodically (every 2–3 seconds) to allow silence threshold tuning
+- [ ] When speech starts, a debug line is logged with the RMS value that triggered detection
+- [ ] When silence is detected, a debug line is logged with the utterance duration
+- [ ] Transcription timing is logged: duration in seconds and the resulting transcribed text
+- [ ] In agent mode, Claude subprocess start, finish, and elapsed time are logged
+- [ ] Debug mode is compatible with all flag combinations (`--agent`, `--model`, `--language`, etc.)
+
+### 2.6 Transcription Accuracy
+
+**Description:** Ensure transcription quality is sufficient for reliable voice-command use, particularly in agent mode. The default model should be tuned for agent mode where accuracy matters more than minimal resource usage.
+
+**Acceptance Criteria:**
+- [ ] When `--agent` is used without an explicit `--model` flag, the default model is `small` (not `base`) for better accuracy/speed tradeoff on CPU
+- [ ] When `--model` is specified explicitly, that model is used regardless of mode
+- [ ] Transcription handles common English commands accurately: file operations, code-related terms, and technical vocabulary
+- [ ] If a transcription takes longer than 5 seconds (applicable with `medium` or `large` models on CPU), a warning is logged suggesting the user switch to a smaller model
+- [ ] At startup, if `medium` or `large` model is selected without GPU, a warning is printed informing the user of potential latency
+
+### 2.7 Voice-Controlled Claude Code Agent Mode
 
 **Description:** The `--agent` flag enables a voice-to-Claude pipeline. Each completed utterance is sent to `claude -p "<text>"` and the response is printed in the terminal. Audio capture continues non-blocking while Claude is processing.
 
@@ -129,6 +157,9 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 - [ ] `CLAUDECODE` env var is stripped before spawning Claude subprocess
 - [ ] End-to-end latency (speech end → Claude response displayed) is under 10 seconds for short commands
 - [ ] STT transcription completes within 2 seconds of silence detection
+- [ ] `--debug` flag produces timestamped diagnostic output to stderr without affecting stdout
+- [ ] Agent mode defaults to `small` model when `--model` is not specified
+- [ ] Slow transcription (>5s) produces a warning suggesting a smaller model
 
 ### 5.2 Future Enhancements
 
@@ -142,4 +173,4 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: 2026-03-05*
+*Last updated: 2026-03-09*
