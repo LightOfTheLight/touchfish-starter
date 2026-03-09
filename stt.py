@@ -148,9 +148,14 @@ def run_claude(text: str) -> str:
             errors="replace",
             env=env,
         )
-        if result.returncode != 0 and result.stderr:
-            return f"[Claude error (exit {result.returncode})]: {result.stderr.strip()}"
-        return result.stdout.strip() or f"[Claude returned empty response (exit {result.returncode})]"
+        if result.returncode != 0:
+            parts = [f"[Claude error (exit {result.returncode})]"]
+            if result.stderr:
+                parts.append(result.stderr.strip())
+            if result.stdout:
+                parts.append(result.stdout.strip())
+            return ": ".join(parts)
+        return result.stdout.strip() or "[Claude returned empty response]"
     except subprocess.TimeoutExpired:
         return "[Claude timed out after 120 seconds]"
     except FileNotFoundError:
@@ -201,6 +206,7 @@ def run(args: argparse.Namespace) -> None:
         """
         buffer = []
         silence_chunk_count = 0
+        speech_chunk_count = 0
         in_speech = False
 
         max_silence_chunks = max(
@@ -222,6 +228,7 @@ def run(args: argparse.Namespace) -> None:
                 # Speech energy detected — accumulate
                 buffer.append(chunk)
                 silence_chunk_count = 0
+                speech_chunk_count += 1
                 in_speech = True
             elif in_speech:
                 # Trailing silence after speech
@@ -229,8 +236,8 @@ def run(args: argparse.Namespace) -> None:
                 silence_chunk_count += 1
 
                 if silence_chunk_count >= max_silence_chunks:
-                    # End of utterance — transcribe if long enough
-                    if len(buffer) >= min_speech_chunks:
+                    # End of utterance — transcribe if enough speech (not silence) was captured
+                    if speech_chunk_count >= min_speech_chunks:
                         audio_data = np.concatenate(buffer)
                         try:
                             segments, _ = model.transcribe(
@@ -247,6 +254,7 @@ def run(args: argparse.Namespace) -> None:
 
                     buffer.clear()
                     silence_chunk_count = 0
+                    speech_chunk_count = 0
                     in_speech = False
 
     transcription_thread = threading.Thread(target=transcription_loop, daemon=True)

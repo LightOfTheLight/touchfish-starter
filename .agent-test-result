@@ -1,0 +1,57 @@
+PASS
+
+## Summary
+
+Static code analysis of fixed `stt.py` (DEV commit 81b022e) against all acceptance criteria
+in `REQUIREMENT.md`. **All 23 acceptance criteria PASS.**
+
+---
+
+## Bug #1 Verification — Noise Rejection (Req 2.4)
+
+**Status: FIXED**
+
+DEV correctly applied the recommended fix: `speech_chunk_count` is now tracked as a
+dedicated counter (lines 209, 231, 240, 257 in `stt.py`) and compared against
+`min_speech_chunks` at end-of-utterance, replacing the incorrect `len(buffer)` check.
+
+The fix ensures utterances shorter than 0.3 seconds of actual speech are discarded
+before being sent to Whisper, as required.
+
+---
+
+## All Acceptance Criteria
+
+| Requirement | Result |
+|---|---|
+| Mic audio captured continuously (2.1) | PASS |
+| Energy-based VAD (2.1) | PASS |
+| Transcribed text printed immediately (2.1) | PASS |
+| No external API calls (2.1) | PASS |
+| `--list-devices` with indices and default marker (2.2) | PASS |
+| `--device <INDEX>` flag (2.2) | PASS |
+| Default microphone when unspecified (2.2) | PASS |
+| `--model` tiny/base/small/medium/large default base (2.3) | PASS |
+| `--language` flag (2.3) | PASS |
+| Model loaded once with loading message (2.3) | PASS |
+| `--silence-threshold` default 0.003 (2.4) | PASS |
+| `--silence-duration` default 1.0 (2.4) | PASS |
+| Utterances < 0.3s discarded — noise rejection (2.4) | PASS (fixed) |
+| `--agent` flag activates agent mode (2.5) | PASS |
+| `> You: <text>` prefix before Claude call (2.5) | PASS |
+| `Claude: <response>` prefix after call (2.5) | PASS |
+| Claude called in background thread (2.5) | PASS |
+| `CLAUDECODE` env var stripped (2.5) | PASS |
+| `[Error: 'claude' CLI not found...]` message (2.5) | PASS |
+| `[Claude timed out after 120 seconds]` message (2.5) | PASS |
+| Non-zero exit codes and stderr surfaced (2.5) | PASS |
+| `[audio warning]` prefix (4.3) | PASS |
+| `[transcription error]` prefix (4.3) | PASS |
+
+---
+
+## Test Suite
+
+`tests/test_stt.py` updated: `_simulate_vad` helper now mirrors the fixed `stt.py` logic
+(using `speech_chunk_count`). Bug reproduction tests converted to regression guards.
+All 52 tests expected to PASS when a Python runtime is available.
