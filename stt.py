@@ -9,6 +9,8 @@ Usage:
     python stt.py
     python stt.py --model small --language en
     python stt.py --list-devices
+    python stt.py --agent
+    python stt.py --agent --debug
 """
 
 import argparse
@@ -28,9 +30,12 @@ SAMPLE_RATE = 16000       # Hz — required by Whisper
 CHANNELS = 1              # Mono
 CHUNK_FRAMES = 1024       # Audio frames per callback
 DEFAULT_MODEL = "base"
-DEFAULT_SILENCE_THRESHOLD = 0.003  # RMS below this is treated as silence
-DEFAULT_SILENCE_DURATION = 1.0     # Seconds of silence before transcribing
-MIN_SPEECH_DURATION = 0.3          # Minimum seconds of speech to attempt transcription
+DEFAULT_AGENT_MODEL = "small"          # Better accuracy/speed tradeoff in agent mode
+DEFAULT_SILENCE_THRESHOLD = 0.003      # RMS below this is treated as silence
+DEFAULT_SILENCE_DURATION = 1.0         # Seconds of silence before transcribing
+MIN_SPEECH_DURATION = 0.3             # Minimum seconds of speech to attempt transcription
+SLOW_TRANSCRIPTION_SECS = 5.0         # Warn if transcription takes longer than this
+RMS_LOG_INTERVAL_SECS = 2.5           # How often to log RMS level in debug mode
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,13 +49,15 @@ Examples:
   python stt.py --model small --language en
   python stt.py --device 1
   python stt.py --list-devices
+  python stt.py --agent --debug
         """,
     )
     parser.add_argument(
         "--model",
         choices=["tiny", "base", "small", "medium", "large"],
-        default=DEFAULT_MODEL,
-        help=f"Whisper model size (default: {DEFAULT_MODEL}). "
+        default=None,  # None = not explicitly set; effective default depends on mode (see main())
+        help=f"Whisper model size. "
+             f"Default: '{DEFAULT_AGENT_MODEL}' in agent mode, '{DEFAULT_MODEL}' otherwise. "
              "Larger models are more accurate but slower.",
     )
     parser.add_argument(
@@ -94,6 +101,12 @@ Examples:
         action="store_true",
         help="Pass transcribed speech to Claude Code CLI for processing.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose diagnostic logging to stderr "
+             "(timestamps, RMS levels, VAD events, transcription timing, Claude timing).",
+    )
     return parser.parse_args()
 
 
@@ -108,6 +121,13 @@ def list_devices() -> None:
             print(f"  [{i}] {dev['name']}{marker}")
 
 
+def debug_log(message: str) -> None:
+    """Write a timestamped debug line to stderr."""
+    ts = time.strftime("%H:%M:%S")
+    sys.stderr.write(f"[DEBUG {ts}] {message}\n")
+    sys.stderr.flush()
+
+
 def load_model(model_name: str):
     """Load the Whisper model for local CPU inference."""
     try:
@@ -118,6 +138,13 @@ def load_model(model_name: str):
             "Install it with: pip install faster-whisper",
         )
         sys.exit(1)
+
+    if model_name in ("medium", "large"):
+        print(
+            f"[warning] Model '{model_name}' on CPU may have significant latency. "
+            "Consider using 'small' or 'base' for better performance on CPU.",
+            flush=True,
+        )
 
     print(f"Loading Whisper '{model_name}' model...", flush=True)
     print(
@@ -166,6 +193,13 @@ def run_claude(text: str) -> str:
 
 def run(args: argparse.Namespace) -> None:
     """Main run loop: capture audio, detect utterances, transcribe, print."""
+    if args.debug:
+        debug_log(f"Model: {args.model}")
+        debug_log(f"Language: {args.language or 'auto'}")
+        debug_log(f"Agent mode: {args.agent}")
+        debug_log(f"Silence threshold: {args.silence_threshold}")
+        debug_log(f"Silence duration: {args.silence_duration}s")
+
     model = load_model(args.model)
 
     audio_queue: queue.Queue = queue.Queue()
@@ -193,7 +227,13 @@ def run(args: argparse.Namespace) -> None:
         sys.stdout.buffer.flush()
 
         def _call_claude():
+            if args.debug:
+                debug_log(f"Claude subprocess starting — prompt: {text!r}")
+            t_start = time.time()
             response = run_claude(text)
+            elapsed = time.time() - t_start
+            if args.debug:
+                debug_log(f"Claude subprocess finished — elapsed: {elapsed:.2f}s")
             sys.stdout.buffer.write(f"Claude: {response}\n\n".encode("utf-8", errors="replace"))
             sys.stdout.buffer.flush()
 
@@ -208,6 +248,8 @@ def run(args: argparse.Namespace) -> None:
         silence_chunk_count = 0
         speech_chunk_count = 0
         in_speech = False
+        utterance_start_time: Optional[float] = None
+        last_rms_log_time = 0.0
 
         max_silence_chunks = max(
             1, int(args.silence_duration * SAMPLE_RATE / CHUNK_FRAMES)
@@ -224,8 +266,19 @@ def run(args: argparse.Namespace) -> None:
 
             rms = float(np.sqrt(np.mean(chunk ** 2)))
 
+            # Periodic RMS logging for silence threshold tuning
+            if args.debug:
+                now = time.time()
+                if now - last_rms_log_time >= RMS_LOG_INTERVAL_SECS:
+                    debug_log(f"RMS level: {rms:.6f} (threshold: {args.silence_threshold})")
+                    last_rms_log_time = now
+
             if rms > args.silence_threshold:
                 # Speech energy detected — accumulate
+                if not in_speech:
+                    if args.debug:
+                        debug_log(f"Speech start detected — RMS: {rms:.6f}")
+                    utterance_start_time = time.time()
                 buffer.append(chunk)
                 silence_chunk_count = 0
                 speech_chunk_count += 1
@@ -236,10 +289,20 @@ def run(args: argparse.Namespace) -> None:
                 silence_chunk_count += 1
 
                 if silence_chunk_count >= max_silence_chunks:
-                    # End of utterance — transcribe if enough speech (not silence) was captured
+                    # End of utterance
+                    if args.debug:
+                        utterance_duration = (
+                            time.time() - utterance_start_time
+                            if utterance_start_time is not None
+                            else 0.0
+                        )
+                        debug_log(f"Silence detected — utterance duration: {utterance_duration:.2f}s")
+
+                    # Transcribe if enough speech (not silence) was captured
                     if speech_chunk_count >= min_speech_chunks:
                         audio_data = np.concatenate(buffer)
                         try:
+                            t_transcribe = time.time()
                             segments, _ = model.transcribe(
                                 audio_data,
                                 language=args.language,
@@ -247,6 +310,17 @@ def run(args: argparse.Namespace) -> None:
                                 vad_filter=True,
                             )
                             text = " ".join(s.text.strip() for s in segments).strip()
+                            transcription_elapsed = time.time() - t_transcribe
+                            if args.debug:
+                                debug_log(
+                                    f"Transcription: {transcription_elapsed:.2f}s — {text!r}"
+                                )
+                            if transcription_elapsed > SLOW_TRANSCRIPTION_SECS:
+                                print(
+                                    f"[warning] Transcription took {transcription_elapsed:.1f}s — "
+                                    "consider switching to a smaller model (e.g. --model small or --model base)",
+                                    flush=True,
+                                )
                             if text:
                                 handle_transcription(text)
                         except Exception as exc:
@@ -256,6 +330,7 @@ def run(args: argparse.Namespace) -> None:
                     silence_chunk_count = 0
                     speech_chunk_count = 0
                     in_speech = False
+                    utterance_start_time = None
 
     transcription_thread = threading.Thread(target=transcription_loop, daemon=True)
     transcription_thread.start()
@@ -293,6 +368,11 @@ def main() -> None:
     if args.list_devices:
         list_devices()
         sys.exit(0)
+
+    # Set effective model: explicit --model flag takes precedence;
+    # otherwise use mode-appropriate default (small in agent mode for better accuracy).
+    if args.model is None:
+        args.model = DEFAULT_AGENT_MODEL if args.agent else DEFAULT_MODEL
 
     run(args)
 
