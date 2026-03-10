@@ -480,8 +480,8 @@ class TestRunErrorHandling:
 class TestVADConstants:
     """Verify module-level constants and derived thresholds match requirements."""
 
-    def test_default_silence_threshold_is_0_003(self):
-        assert stt.DEFAULT_SILENCE_THRESHOLD == pytest.approx(0.003)
+    def test_default_silence_threshold_is_0_01(self):
+        assert stt.DEFAULT_SILENCE_THRESHOLD == pytest.approx(0.01)
 
     def test_default_silence_duration_is_1_second(self):
         assert stt.DEFAULT_SILENCE_DURATION == pytest.approx(1.0)
@@ -511,7 +511,7 @@ class TestVADConstants:
         assert rms < stt.DEFAULT_SILENCE_THRESHOLD
 
     def test_speech_audio_rms_above_threshold(self):
-        speech = np.full(stt.CHUNK_FRAMES, 0.01, dtype=np.float32)
+        speech = np.full(stt.CHUNK_FRAMES, 0.02, dtype=np.float32)
         rms = float(np.sqrt(np.mean(speech ** 2)))
         assert rms > stt.DEFAULT_SILENCE_THRESHOLD
 
@@ -634,7 +634,7 @@ class TestMinSpeechDurationNoisRejection:
         max_silence_chunks = max(1, int(silence_duration * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
         min_speech_chunks = max(1, int(stt.MIN_SPEECH_DURATION * stt.SAMPLE_RATE / stt.CHUNK_FRAMES))
 
-        speech_chunk = np.full(stt.CHUNK_FRAMES, 0.01, dtype=np.float32)  # rms=0.01 > 0.003
+        speech_chunk = np.full(stt.CHUNK_FRAMES, 0.02, dtype=np.float32)  # rms=0.02 > 0.01
         silence_chunk = np.zeros(stt.CHUNK_FRAMES, dtype=np.float32)       # rms=0.0
 
         # ---- replicate the FIXED loop body (matches stt.py transcription_loop) ----
@@ -720,34 +720,34 @@ class TestMinSpeechDurationNoisRejection:
 # ===========================================================================
 
 class TestDebugMode:
-    """Req 2.5 — --debug flag enables verbose timestamped diagnostic output to stderr."""
+    """Req 2.5 — --debug flag enables verbose timestamped diagnostic output to stdout."""
 
     # -----------------------------------------------------------------------
     # debug_log() helper function
     # -----------------------------------------------------------------------
 
-    def test_debug_log_writes_to_stderr(self, capsys):
-        """Req 2.5: All debug output goes to stderr only."""
+    def test_debug_log_writes_to_stdout(self, capsys):
+        """Req 2.5: All debug output goes to stdout (binary buffer, UTF-8 encoded)."""
         stt.debug_log("test message")
-        assert "test message" in capsys.readouterr().err
+        assert "test message" in capsys.readouterr().out
 
-    def test_debug_log_nothing_on_stdout(self, capsys):
-        """Req 2.5: stdout must be unchanged by debug output."""
+    def test_debug_log_nothing_on_stderr(self, capsys):
+        """Req 2.5: stderr must be unchanged by debug output."""
         stt.debug_log("test message")
-        assert "test message" not in capsys.readouterr().out
+        assert "test message" not in capsys.readouterr().err
 
     def test_debug_log_format_has_debug_prefix(self, capsys):
         """Req 2.5: Debug lines contain [DEBUG prefix."""
         stt.debug_log("hello")
-        assert "[DEBUG " in capsys.readouterr().err
+        assert "[DEBUG " in capsys.readouterr().out
 
     def test_debug_log_format_has_timestamp(self, capsys):
         """Req 2.5: Debug lines are timestamped with [DEBUG HH:MM:SS] format."""
         import re
         stt.debug_log("hello")
-        err = capsys.readouterr().err
-        assert re.search(r'\[DEBUG \d{2}:\d{2}:\d{2}\]', err), (
-            f"Expected [DEBUG HH:MM:SS] format, got: {err!r}"
+        out = capsys.readouterr().out
+        assert re.search(r'\[DEBUG \d{2}:\d{2}:\d{2}\]', out), (
+            f"Expected [DEBUG HH:MM:SS] format, got: {out!r}"
         )
 
     # -----------------------------------------------------------------------
@@ -763,13 +763,13 @@ class TestDebugMode:
     # -----------------------------------------------------------------------
 
     def _run_with_debug(self, capsys, **kwargs):
-        """Run stt.run() with --debug and mocked hardware; return captured stderr."""
+        """Run stt.run() with --debug and mocked hardware; return captured stdout."""
         args = make_args(debug=True, **kwargs)
         with patch("stt.load_model", return_value=MagicMock()), \
              patch("stt.sd.InputStream", side_effect=stt.sd.PortAudioError("mock")):
             with pytest.raises(SystemExit):
                 stt.run(args)
-        return capsys.readouterr().err
+        return capsys.readouterr().out
 
     def test_debug_startup_logs_model_name(self, capsys):
         """Req 2.5: On startup, debug mode logs the model name."""
@@ -797,14 +797,14 @@ class TestDebugMode:
         assert "1.5" in err
 
     def test_no_debug_output_without_flag(self, capsys):
-        """Req 2.5: Without --debug, no [DEBUG lines appear on stderr."""
+        """Req 2.5: Without --debug, no [DEBUG lines appear on stdout."""
         args = make_args(debug=False)
         with patch("stt.load_model", return_value=MagicMock()), \
              patch("stt.sd.InputStream", side_effect=stt.sd.PortAudioError("mock")):
             with pytest.raises(SystemExit):
                 stt.run(args)
-        err = capsys.readouterr().err
-        assert "[DEBUG" not in err
+        out = capsys.readouterr().out
+        assert "[DEBUG" not in out
 
 
 # ===========================================================================

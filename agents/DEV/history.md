@@ -204,6 +204,58 @@ Moved inside `_call_claude()` closure which already has access to `args` via clo
 
 ---
 
+---
+
+### Session 4 — 2026-03-10
+
+**Trigger:** Chain trigger from PO — commit `da7adee` ("PO: Update requirements for Windows debug fix and silence threshold")
+
+**Branch:** `agent/PO/20260310-154557`
+
+**Context:**
+
+PO updated two requirements in `REQUIREMENT.md` to reflect field-tested findings from hotfix `57a8b99`:
+
+1. **Req 2.4 Silence Detection:** Default silence threshold raised from `0.003` → `0.01`. Field testing confirmed `0.003` is too sensitive for typical ambient noise environments (fans, HVAC, keyboard sounds).
+
+2. **Req 2.5 Debug Mode:** Debug output channel changed from stderr to stdout (binary buffer, UTF-8 encoded). `sys.stderr` has an invalid handle on some Windows terminals (WinError 6). The hotfix (`57a8b99`) had already patched `debug_log()` in `stt.py` to use `sys.stdout.buffer`; however, `DEFAULT_SILENCE_THRESHOLD` and the `--debug` argparse help text were not updated, and the test suite still asserted the old stderr behaviour.
+
+**Gap Analysis:**
+
+| Item | Prior State | Action Taken |
+|------|-------------|--------------|
+| `DEFAULT_SILENCE_THRESHOLD` in `stt.py` | `0.003` | Updated to `0.01` |
+| `--debug` argparse help text | "to stderr" | Updated to "to stdout" |
+| `test_default_silence_threshold_is_0_003` | Asserted `0.003` | Renamed and updated to assert `0.01` |
+| `test_speech_audio_rms_above_threshold` | Speech chunk `0.01` (equal to new threshold, not above) | Changed to `0.02` so rms > threshold |
+| `_simulate_vad` speech chunk | `0.01` (equal to new threshold — never classified as speech) | Changed to `0.02` and updated comment |
+| `TestDebugMode` class docstring | "to stderr" | Updated to "to stdout" |
+| `test_debug_log_writes_to_stderr` | Checked `.err` | Renamed to `test_debug_log_writes_to_stdout`; checks `.out` |
+| `test_debug_log_nothing_on_stdout` | Asserted message NOT in `.out` | Renamed to `test_debug_log_nothing_on_stderr`; asserts message NOT in `.err` |
+| `test_debug_log_format_has_debug_prefix` | Checked `.err` | Updated to check `.out` |
+| `test_debug_log_format_has_timestamp` | Checked `.err` | Updated to check `.out` |
+| `_run_with_debug` helper | Returned `capsys.readouterr().err` | Updated to return `.out` |
+| `test_no_debug_output_without_flag` | Checked `.err` for `[DEBUG` | Updated to check `.out` |
+
+**Key decision — speech chunk amplitude in tests:**
+
+The VAD simulation uses `np.full(CHUNK_FRAMES, amplitude)` where amplitude == rms for a DC signal. The VAD check is `rms > silence_threshold` (strictly greater than). With the new threshold of `0.01`, any test using amplitude `0.01` would be classified as silence (equal, not greater). Changed all such test chunks to amplitude `0.02` to remain clearly above the threshold.
+
+**Files Modified:**
+- `stt.py` — Updated `DEFAULT_SILENCE_THRESHOLD` (0.003→0.01) and `--debug` help text (stderr→stdout)
+- `tests/test_stt.py` — Updated 10 test locations to align with new threshold and stdout debug output
+- `agents/DEV/history.md` — This file
+
+**Decisions & Assumptions:**
+
+| Item | Decision |
+|------|----------|
+| `debug_log()` implementation | Already correct (hotfix 57a8b99); no change needed |
+| Speech chunk amplitude in tests | 0.02 (strictly above 0.01 threshold, clean margin) |
+| Other test assertions | Unchanged — all other tests remain valid with new threshold |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -211,6 +263,7 @@ Moved inside `_call_claude()` closure which already has access to `args` via clo
 | 2026-03-05 | Session 1 | Gap analysis; fixed run_claude exit code bug; added requirements.txt |
 | 2026-03-05 | Session 2 | Fixed Bug #1: noise rejection always-True condition (speech_chunk_count vs len(buffer)) |
 | 2026-03-09 | Session 3 | Implemented Debug Mode (Req 2.5) and Transcription Accuracy (Req 2.6) |
+| 2026-03-10 | Session 4 | Updated silence threshold (0.003→0.01), debug output channel (stderr→stdout); aligned tests |
 
 ---
 

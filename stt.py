@@ -31,7 +31,7 @@ CHANNELS = 1              # Mono
 CHUNK_FRAMES = 1024       # Audio frames per callback
 DEFAULT_MODEL = "base"
 DEFAULT_AGENT_MODEL = "small"          # Better accuracy/speed tradeoff in agent mode
-DEFAULT_SILENCE_THRESHOLD = 0.003      # RMS below this is treated as silence
+DEFAULT_SILENCE_THRESHOLD = 0.01       # RMS below this is treated as silence
 DEFAULT_SILENCE_DURATION = 1.0         # Seconds of silence before transcribing
 MIN_SPEECH_DURATION = 0.3             # Minimum seconds of speech to attempt transcription
 SLOW_TRANSCRIPTION_SECS = 5.0         # Warn if transcription takes longer than this
@@ -104,7 +104,7 @@ Examples:
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable verbose diagnostic logging to stderr "
+        help="Enable verbose diagnostic logging to stdout "
              "(timestamps, RMS levels, VAD events, transcription timing, Claude timing).",
     )
     return parser.parse_args()
