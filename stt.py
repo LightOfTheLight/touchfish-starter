@@ -122,10 +122,11 @@ def list_devices() -> None:
 
 
 def debug_log(message: str) -> None:
-    """Write a timestamped debug line to stderr."""
+    """Write a timestamped debug line to stdout."""
     ts = time.strftime("%H:%M:%S")
-    sys.stderr.write(f"[DEBUG {ts}] {message}\n")
-    sys.stderr.flush()
+    line = f"[DEBUG {ts}] {message}\n"
+    sys.stdout.buffer.write(line.encode("utf-8", errors="replace"))
+    sys.stdout.buffer.flush()
 
 
 def load_model(model_name: str):
