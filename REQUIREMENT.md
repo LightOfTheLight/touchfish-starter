@@ -55,17 +55,19 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 **Description:** Allow tuning of VAD sensitivity to accommodate different environments.
 
 **Acceptance Criteria:**
-- [ ] `--silence-threshold <LEVEL>` sets the RMS amplitude below which audio is considered silence (default: `0.003`)
+- [ ] `--silence-threshold <LEVEL>` sets the RMS amplitude below which audio is considered silence (default: `0.01`)
 - [ ] `--silence-duration <SECS>` sets how long silence must persist before triggering transcription (default: `1.0`)
 - [ ] Utterances shorter than 0.3 seconds of speech are discarded (noise rejection)
 
+> **Note:** The default silence threshold was raised from `0.003` to `0.01` based on field experience. A threshold of `0.003` is too sensitive for typical environments with ambient noise (fans, HVAC, keyboard sounds), causing continuous false-positive speech detection. Users in very quiet, anechoic environments may still lower it, but `0.01` is the recommended starting point for most real-world setups.
+
 ### 2.5 Debug Mode
 
-**Description:** A `--debug` flag that enables verbose diagnostic logging to stderr, allowing users to diagnose microphone levels, VAD behavior, transcription timing, and Claude subprocess performance without interfering with normal stdout output.
+**Description:** A `--debug` flag that enables verbose diagnostic logging, allowing users to diagnose microphone levels, VAD behavior, transcription timing, and Claude subprocess performance.
 
 **Acceptance Criteria:**
 - [ ] `--debug` flag activates debug mode
-- [ ] All debug output goes to **stderr** only — stdout output is unchanged
+- [ ] All debug output is written to **stdout** (via binary buffer with UTF-8 encoding) for cross-platform compatibility — `sys.stderr` has an invalid handle on some Windows terminals (WinError 6) and must not be used for debug output
 - [ ] All debug lines are timestamped with format `[DEBUG HH:MM:SS] <message>`
 - [ ] On startup, debug mode prints: model name, language, agent mode status, silence threshold, silence duration
 - [ ] During capture, RMS audio level is logged periodically (every 2–3 seconds) to allow silence threshold tuning
@@ -157,7 +159,7 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 - [ ] `CLAUDECODE` env var is stripped before spawning Claude subprocess
 - [ ] End-to-end latency (speech end → Claude response displayed) is under 10 seconds for short commands
 - [ ] STT transcription completes within 2 seconds of silence detection
-- [ ] `--debug` flag produces timestamped diagnostic output to stderr without affecting stdout
+- [ ] `--debug` flag produces timestamped diagnostic output via stdout (binary buffer, UTF-8 encoded) for cross-platform compatibility including Windows
 - [ ] Agent mode defaults to `small` model when `--model` is not specified
 - [ ] Slow transcription (>5s) produces a warning suggesting a smaller model
 
@@ -173,4 +175,4 @@ A terminal plugin that captures microphone input and transcribes speech locally 
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: 2026-03-09*
+*Last updated: 2026-03-10*

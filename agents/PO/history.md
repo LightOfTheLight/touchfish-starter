@@ -119,12 +119,56 @@ This session was triggered by a workflow fix commit. The previous PO trigger (`3
 
 ---
 
+---
+
+### Session 3 — 2026-03-10
+
+**Trigger:** Commit `57a8b99` — "Fix debug_log crash on Windows: stderr handle invalid (WinError 6) @PO"
+
+**Branch:** `agent/PO/20260310-154557`
+
+**Context:**
+A hotfix was applied to `stt.py` by the developer that changed two behaviors:
+1. `debug_log()` was switched from `sys.stderr` to `sys.stdout.buffer` (UTF-8 encoded) because `sys.stderr` has an invalid handle on some Windows terminals (WinError 6), causing a crash.
+2. Field testing revealed the default silence threshold of `0.003` is too low for typical ambient noise environments (HVAC, fans, keyboard noise), causing continuous false-positive speech detection. A threshold of `0.01` was found to be a more appropriate default.
+
+The commit explicitly requested PO to update requirements accordingly.
+
+**Analysis:**
+
+1. **Debug output channel change:** REQUIREMENT.md Section 2.5 previously mandated stderr as the exclusive debug output channel ("All debug output goes to **stderr** only — stdout output is unchanged"). The implementation now writes to `sys.stdout.buffer`. This is a platform compatibility fix — Windows cannot reliably use stderr in all terminal environments.
+
+2. **Silence threshold default change:** Section 2.4 documented `0.003` as the default. This value was derived from the initial implementation but proven too sensitive in practice. The implementation's help text already hints at this ("Increase if background noise triggers false positives"), but the formal requirement must reflect a better default.
+
+**Actions Taken:**
+
+- **Section 2.5 Debug Mode:** Updated acceptance criterion — changed "All debug output goes to **stderr** only" to "All debug output is written to **stdout** (via binary buffer with UTF-8 encoding) for cross-platform compatibility" with explicit note that `sys.stderr` must not be used (WinError 6 on Windows).
+- **Section 2.4 Silence Detection Tuning:** Changed `--silence-threshold` default from `0.003` to `0.01`; added explanatory note about the rationale (field-tested; 0.003 too sensitive for ambient noise environments).
+- **Section 5.1 MVP:** Updated debug acceptance criterion to match the new stdout-based output channel.
+- Updated document `Last updated` date to 2026-03-10.
+
+**Decisions & Assumptions:**
+
+| Item | Decision |
+|------|----------|
+| Debug output channel | Requirement updated to stdout (binary buffer); rationale: Windows stderr WinError 6 incompatibility is a real cross-platform issue, not an edge case |
+| Debug output mixing with transcription | Accepted as a necessary trade-off for Windows compatibility; debug lines are clearly prefixed with `[DEBUG HH:MM:SS]` so they are visually distinguishable |
+| Silence threshold default | Changed to `0.01`; this is the value the developer found works in practice. Users in anechoic environments may lower it |
+| Implementation alignment | The silence threshold change in REQUIREMENT.md is a forward requirement — the implementation still has `0.003`. DEV must update `DEFAULT_SILENCE_THRESHOLD` to `0.01` in `stt.py` to align |
+
+**Files Modified:**
+- `REQUIREMENT.md` — Updated sections 2.4 and 2.5; updated 5.1 MVP criterion; updated date
+- `agents/PO/history.md` — This file
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-05 | Session 1 | Initial REQUIREMENT.md written from README.md analysis; agent mode and performance SLAs formalized |
 | 2026-03-09 | Session 2 | Added Debug Mode (2.5) and Transcription Accuracy (2.6) requirements; updated model defaults in 2.3 and MVP criteria |
+| 2026-03-10 | Session 3 | Updated debug output channel from stderr to stdout (Windows compatibility); raised silence threshold default from 0.003 to 0.01 (ambient noise field fix) |
 
 ---
 
