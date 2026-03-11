@@ -18,3 +18,9 @@ Create a Google Chrome dinosaur runner web game.
 - Responsive design that works on both desktop and mobile
 - Keyboard controls: Space/Up Arrow to jump, Down Arrow to duck
 - Touch controls for mobile: tap to jump, swipe down to duck
+- Sound effects for game events:
+  - Jump sound when the dinosaur jumps
+  - Point/milestone sound when reaching score milestones (e.g. every 100 points)
+  - Collision/game over sound when hitting an obstacle
+  - Sounds should be generated programmatically using the Web Audio API (no external audio files needed)
+  - Include a mute/unmute toggle so players can disable sounds
