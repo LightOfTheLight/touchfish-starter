@@ -186,12 +186,98 @@ Lines changed: ~8 lines modified (no structural changes to game logic).
 
 ---
 
+---
+
+### Session 3 — 2026-03-11
+
+**Branch:** `agent/PO/20260311-133109`
+**Trigger:** Chain trigger from PO Session 4 — "Chain trigger: DEV" (sound effects)
+
+#### Context
+
+PO Session 4 formalized sound effects as a full functional requirement (Section 2.8) after the README was updated to include them. Prior sessions had listed sound only under "Future Enhancements". The game is fully playable; this session adds the audio layer only.
+
+#### Thinking Process
+
+1. **Read context files** — Reviewed `DEV.md`, `history.md` (Sessions 1–2), `REQUIREMENT.md` (new Section 2.8 and 6.5b), and `agents/PO/history.md` (Session 4 details).
+
+2. **Scope assessment** — All previous functionality (dino mechanics, obstacles, scoring, day/night, mobile touch) remains unchanged. Only additions needed:
+   - Web Audio API sound system
+   - Three synthesized sounds: jump, milestone, collision
+   - Mute/unmute toggle button always visible
+
+3. **Audio architecture decisions:**
+
+   **AudioContext lazy-init:** Browsers require a user gesture before audio plays. `initAudio()` is called at the entry points of all user-initiated actions:
+   - `handleAction()` — covers Space/Up to start, restart, and jump
+   - `touchend` handler — covers tap-to-jump on mobile
+   - Mute button click handler — initializes even if user mutes before playing
+
+   **Mute strategy:** A global `isMuted` flag is checked inside each play function. `AudioContext` is not suspended (per spec guidance) — this avoids timing issues with context state. Muting is instantaneous and non-destructive to any currently-playing sounds.
+
+   **Sound synthesis (per Section 6.5b):**
+   - Jump: sine oscillator, 220Hz→440Hz frequency ramp, 100ms duration, gain 0.15→0
+   - Milestone: two-tone chime, 880Hz then 1100Hz (sequential, 90ms apart), 80ms each, gain 0.12→0
+   - Collision: sawtooth oscillator, 200Hz→50Hz descending ramp, 300ms, gain 0.2→0
+
+   Each sound creates its own OscillatorNode+GainNode chain and auto-disposes via `osc.stop()`.
+
+   **Milestone tracking:** Added `lastMilestone` integer tracking the last 100-point multiple that fired a chime. Compared against `Math.floor(score / 100)` every frame. Reset to 0 on game start/restart.
+
+   **Mute button:** HTML `<button id="mute">` positioned absolutely over the canvas top-right corner using `position: absolute` on `#wrap`. This avoids canvas hit-test complexity and is natively accessible. Button text toggles between 🔊 and 🔇.
+
+4. **Integration points modified:**
+   - `dino.jump()` — added `playJump()` call after `jumping = true`
+   - `handleAction()` — added `initAudio()` at top
+   - `touchend` handler — added `initAudio()` before `dino.jump()`
+   - `gameOver()` — added `playCollision()` call
+   - `update()` — added milestone check after score increment
+   - `startGame()` — reset `lastMilestone = 0`
+
+5. **No changes to game mechanics** — all collision, physics, scoring, and visual systems are identical to Session 2.
+
+#### Implementation
+
+**File modified:** `index.html`
+
+Changes summary:
+- CSS: Added `position: relative` to `#wrap`; added `#mute` button styles
+- HTML: Added `<button id="mute" aria-label="Toggle mute">🔊</button>` after `<canvas>`
+- JS: Added `─── Audio ───` section with `initAudio`, `playJump`, `playMilestone`, `playCollision`, mute button click handler
+- JS: Added `lastMilestone` game state variable
+- JS: Modified `dino.jump()`, `handleAction()`, `touchend`, `update()`, `startGame()`, `gameOver()`
+
+Requirements fulfilled vs REQUIREMENT.md Section 2.8:
+
+| Criterion | Status |
+|-----------|--------|
+| Jump sound plays on jump | ✅ |
+| Milestone sound every 100 points | ✅ |
+| Collision/game-over sound on hit | ✅ |
+| All sounds via Web Audio API (no files) | ✅ |
+| Mute/unmute toggle button always visible | ✅ |
+| Toggling mute silences subsequent sounds | ✅ |
+| Mute state preserved for session duration | ✅ (isMuted flag, no localStorage needed) |
+
+#### Decisions & Assumptions
+
+| Item | Decision |
+|------|----------|
+| AudioContext init | Lazy on first user gesture; `initAudio()` at all entry points |
+| Mute implementation | `isMuted` flag checked before each play call; context not suspended |
+| Mute button placement | HTML button overlaid on canvas (absolute positioning) — avoids canvas hit-test code |
+| Milestone tracking | Integer `lastMilestone` compared to `Math.floor(score/100)` each frame |
+| Sound on touch jump | `initAudio()` added to `touchend` handler independently of `handleAction()` |
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
 |------|---------|--------|
 | 2026-03-03 | Session 1 | Initial implementation of Google Dinosaur game in index.html |
 | 2026-03-03 | Session 2 | Fix BUG-001: deferred mobile jump to touchend to allow swipe-down duck |
+| 2026-03-11 | Session 3 | Add sound effects (jump, milestone, collision) and mute toggle via Web Audio API |
 
 ---
 

@@ -20,6 +20,7 @@
     }
 
     #wrap {
+      position: relative;
       width: 100%;
       max-width: 800px;
       padding: 0 12px;
@@ -33,11 +34,27 @@
       touch-action: none;
       transition: border-color 0.4s;
     }
+
+    #mute {
+      position: absolute;
+      top: 8px;
+      right: 20px;
+      background: none;
+      border: none;
+      font-size: 20px;
+      cursor: pointer;
+      padding: 2px 4px;
+      z-index: 1;
+      line-height: 1;
+      opacity: 0.75;
+    }
+    #mute:hover { opacity: 1; }
   </style>
 </head>
 <body>
   <div id="wrap">
     <canvas id="c" width="800" height="300"></canvas>
+    <button id="mute" aria-label="Toggle mute">🔊</button>
   </div>
 
   <script>
@@ -68,13 +85,84 @@
   const cvs = document.getElementById('c');
   const ctx = cvs.getContext('2d');
 
+  // ─── Audio ───────────────────────────────────────────────────────────────────
+  let audioCtx   = null;
+  let masterGain = null;
+  let isMuted    = false;
+  const muteBtn  = document.getElementById('mute');
+
+  function initAudio() {
+    if (audioCtx) return;
+    audioCtx   = new AudioContext();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 1;
+    masterGain.connect(audioCtx.destination);
+  }
+
+  function playJump() {
+    if (!audioCtx || isMuted) return;
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.type = 'sine';
+    const t = audioCtx.currentTime;
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.linearRampToValueAtTime(440, t + 0.1);
+    gain.gain.setValueAtTime(0.15, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.1);
+    osc.start(t);
+    osc.stop(t + 0.1);
+  }
+
+  function playMilestone() {
+    if (!audioCtx || isMuted) return;
+    const t = audioCtx.currentTime;
+    [880, 1100].forEach((freq, i) => {
+      const osc  = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.type = 'sine';
+      const start = t + i * 0.09;
+      osc.frequency.setValueAtTime(freq, start);
+      gain.gain.setValueAtTime(0.12, start);
+      gain.gain.linearRampToValueAtTime(0, start + 0.08);
+      osc.start(start);
+      osc.stop(start + 0.08);
+    });
+  }
+
+  function playCollision() {
+    if (!audioCtx || isMuted) return;
+    const osc  = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.type = 'sawtooth';
+    const t = audioCtx.currentTime;
+    osc.frequency.setValueAtTime(200, t);
+    osc.frequency.linearRampToValueAtTime(50, t + 0.3);
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.linearRampToValueAtTime(0, t + 0.3);
+    osc.start(t);
+    osc.stop(t + 0.3);
+  }
+
+  muteBtn.addEventListener('click', () => {
+    initAudio();
+    isMuted = !isMuted;
+    muteBtn.textContent = isMuted ? '🔇' : '🔊';
+  });
+
   // ─── Game state ──────────────────────────────────────────────────────────────
   let state    = 'idle';    // 'idle' | 'running' | 'gameover'
   let score    = 0;
   let hiScore  = parseInt(localStorage.getItem('dino_hi') || '0', 10);
   let spd      = INIT_SPD;
   let night    = false;
-  let lastCycleAt = 0;      // score value when last day/night toggle happened
+  let lastCycleAt   = 0;      // score value when last day/night toggle happened
+  let lastMilestone = 0;      // tracks last 100-point milestone for milestone sound
 
   let obstacles  = [];
   let spawnTimer = 0;
@@ -125,6 +213,7 @@
       if (!this.jumping && !this.ducking) {
         this.vy = JUMP_VEL;
         this.jumping = true;
+        playJump();
       }
     },
 
@@ -209,6 +298,7 @@
   let touchDucking   = false;
 
   function handleAction() {
+    initAudio();
     if (state === 'idle')     { startGame();   return; }
     if (state === 'gameover') { restartGame(); return; }
     if (state === 'running')  { dino.jump();          }
@@ -255,7 +345,7 @@
     e.preventDefault();
     if (state === 'running') {
       // If no downward swipe was detected, treat as a tap → jump
-      if (!touchDucking) dino.jump();
+      if (!touchDucking) { initAudio(); dino.jump(); }
       touchDucking = false;
       if (!duckKey) dino.duck(false);
     }
@@ -263,11 +353,12 @@
 
   // ─── Game control ────────────────────────────────────────────────────────────
   function startGame() {
-    state       = 'running';
-    score       = 0;
-    spd         = INIT_SPD;
-    night       = false;
-    lastCycleAt = 0;
+    state         = 'running';
+    score         = 0;
+    spd           = INIT_SPD;
+    night         = false;
+    lastCycleAt   = 0;
+    lastMilestone = 0;
 
     obstacles  = [];
     spawnTimer = 0;
@@ -300,6 +391,7 @@
 
   function gameOver() {
     state = 'gameover';
+    playCollision();
     const finalScore = Math.floor(score);
     const storedHi   = parseInt(localStorage.getItem('dino_hi') || '0', 10);
     const newHi      = Math.max(storedHi, finalScore);
@@ -331,6 +423,10 @@
     score += SCORE_INC * dt;
     if (score > hiScore) hiScore = score;
     spd = Math.min(spd + SPD_INC * dt, MAX_SPD);
+
+    // Milestone sound — every 100 score points
+    const ms = Math.floor(score / 100);
+    if (ms > lastMilestone) { lastMilestone = ms; playMilestone(); }
 
     // Day/night cycle
     if (score - lastCycleAt >= DAY_NIGHT_INTERVAL) {

@@ -96,6 +96,19 @@ A faithful recreation of the Google Chrome offline dinosaur runner game, playabl
 - [ ] A prompt instructs the player how to start (e.g., "Press Space to Start")
 - [ ] Game begins on the first valid input (Space, Up Arrow, or tap)
 
+### 2.8 Sound Effects
+
+**Description:** The game produces audio feedback for key game events using the Web Audio API. No external audio files are required. Players can mute all sounds.
+
+**Acceptance Criteria:**
+- [ ] A jump sound plays each time the dinosaur jumps
+- [ ] A milestone/point sound plays each time the score reaches a multiple of 100
+- [ ] A collision/game-over sound plays when the dinosaur hits an obstacle
+- [ ] All sounds are generated programmatically via the Web Audio API (no external audio files)
+- [ ] A mute/unmute toggle button is visible on screen at all times during gameplay
+- [ ] Toggling mute silences all subsequent sounds without interrupting the game
+- [ ] Sound state (muted/unmuted) is preserved for the duration of the session
+
 ---
 
 ## 3. Technical Requirements
@@ -109,6 +122,7 @@ A faithful recreation of the Google Chrome offline dinosaur runner game, playabl
 | Logic | Vanilla JavaScript (ES6+) |
 | Storage | Browser localStorage |
 | Rendering | Canvas API or DOM elements |
+| Audio | Web Audio API (programmatic synthesis) |
 
 ### 3.2 Constraints
 
@@ -159,9 +173,10 @@ A faithful recreation of the Google Chrome offline dinosaur runner game, playabl
 - [ ] Day/night cycle implemented
 - [ ] Touch controls for mobile implemented
 - [ ] Responsive layout for mobile screens
+- [ ] Sound effects: jump, milestone, collision (Web Audio API)
+- [ ] Mute/unmute toggle visible and functional
 
 ### 5.3 Future Enhancements
-- Sound effects (jump, collision, milestone score)
 - Achievement system
 - Multiple difficulty settings
 - Leaderboard (requires backend)
@@ -214,6 +229,23 @@ This section provides recommended defaults to resolve open mechanical parameters
 - Score increments by 1 every ~6 frames at normal speed (approx. 0.1 pts/frame at 60fps)
 - Display format: leading zeros to 5 digits (e.g., `00123`)
 
+### 6.5b Sound Effects (Web Audio API)
+
+All audio is synthesized at runtime — no audio files needed.
+
+| Sound | Suggested Synthesis |
+|-------|---------------------|
+| Jump | Short oscillator burst: sine wave, ~220Hz → 440Hz, ~100ms, low gain |
+| Milestone (every 100pts) | Two-tone chime: 880Hz then 1100Hz, ~80ms each, low gain |
+| Collision/Game Over | Descending noise: sawtooth, 200Hz → 50Hz, ~300ms |
+
+**Implementation notes:**
+- Create a single `AudioContext` on first user interaction (browsers require user gesture before audio plays)
+- Lazy-initialize `AudioContext` on the first jump/start input to avoid auto-play policy violations
+- Mute toggle: set `AudioContext.destination` gain node to 0 (muted) or 1 (unmuted) — do not suspend context
+- Expose a global `isMuted` flag checked before each sound play call
+- Mute button: simple icon toggle (e.g., 🔊 / 🔇) positioned top-right of canvas, always visible
+
 ### 6.6 File Structure
 
 Preferred minimal structure:
@@ -232,4 +264,4 @@ Both approaches are acceptable per constraint 3.2.
 ---
 
 *Document maintained by: PO Agent*
-*Last updated: 2026-03-01*
+*Last updated: 2026-03-11*
