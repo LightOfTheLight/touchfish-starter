@@ -172,6 +172,60 @@ Review existing requirements and validate readiness for a new DEV implementation
 
 ---
 
+---
+
+### Session 4 — 2026-03-11
+
+**Branch:** `agent/PO/20260311-133109`
+**Source Branch:** `main`
+**Trigger:** Commit `11345d8` — "Fix workflow: skip chain-origin commit when file unchanged @PO"
+
+#### Task
+
+Review requirements for completeness following a workflow fix. Specifically, the workflow was updated to skip creating a chain-origin commit when no files have changed (prevents empty noise commits). This re-triggered PO for a fresh requirements review.
+
+#### Thinking Process
+
+1. **Read context files** — Reviewed `PO.md` (role), `history.md` (Sessions 1–3), `REQUIREMENT.md`, `README.md`, and the pipeline workflow.
+
+2. **Workflow fix understood** — Prior to this fix, the workflow unconditionally committed `.agent-chain-origin` on every initial trigger. The fix applies `git diff --staged --quiet ||` before the commit, so the chain-origin commit is only created when the file actually changes. This is a pipeline quality improvement with no impact on requirements.
+
+3. **README gap identified** — Commit `1aa1e3e` ("Add sound effects requirements for dino game @PO") added explicit sound requirements to `README.md` before this session. However, `REQUIREMENT.md` still listed sound effects only under **Section 5.3 Future Enhancements** — not as a formal functional requirement. This is a material gap.
+
+4. **Sound requirements in README:**
+   - Jump sound on dinosaur jump
+   - Milestone/point sound every 100 score points
+   - Collision/game-over sound on obstacle hit
+   - All sounds via Web Audio API (no external files)
+   - Mute/unmute toggle
+
+5. **Actions taken:**
+   - Added **Section 2.8 Sound Effects** as a full functional requirement with 7 acceptance criteria
+   - Added **Web Audio API** to the technology stack table (Section 3.1)
+   - Updated **Section 5.2 Full Feature Set** to include sound effects and mute toggle
+   - Removed sound effects from **Section 5.3 Future Enhancements** (now a current requirement)
+   - Added **Section 6.5b Sound Effects** with Web Audio API synthesis guidance (frequencies, patterns, AudioContext initialization strategy, mute toggle approach)
+   - Updated document "Last updated" date to 2026-03-11
+
+#### Decisions & Assumptions
+
+| Item | Decision/Assumption |
+|------|---------------------|
+| Sound scope | All 3 sound events (jump, milestone, collision) are required per README |
+| Milestone interval | Every 100 points — explicitly stated in README |
+| Audio synthesis | Web Audio API programmatic synthesis only — no external files (README explicit) |
+| Mute toggle | Required per README; positioned top-right of canvas for visibility |
+| AudioContext init | Deferred to first user gesture to comply with browser autoplay policies |
+| Session persistence | Mute state persists for session only (no localStorage requirement stated) |
+
+#### Output
+
+- Updated `REQUIREMENT.md`: added Section 2.8, updated Section 3.1, 5.2, 5.3, added Section 6.5b
+- This session log added to `agents/PO/history.md`
+- Pipeline will auto-chain to DEV agent
+
+---
+
 ## Change Log
 
 | Date | Session | Change |
@@ -179,6 +233,7 @@ Review existing requirements and validate readiness for a new DEV implementation
 | 2026-03-01 | Session 1 | Initial REQUIREMENT.md created for Google Dinosaur Web Game |
 | 2026-03-01 | Session 2 | Added Section 6 (Implementation Guidance for DEV) to REQUIREMENT.md |
 | 2026-03-03 | Session 3 | Requirements re-validated after DEV empty commit; no changes needed |
+| 2026-03-11 | Session 4 | Formalized sound effects as Section 2.8; added Web Audio API to tech stack; updated Section 5.2 and 6.5b |
 
 ---
 
