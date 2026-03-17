@@ -20,11 +20,34 @@ Click **"Use this template"** or **"Fork"** to create your own copy.
 
 ### 2. Set up the secret
 
+The agents authenticate with Claude using your OAuth token. Here's how to get it:
+
+**Option A — Claude Code CLI (recommended)**
+
+1. Install Claude Code: `npm install -g @anthropic-ai/claude-code`
+2. Log in: `claude login`
+3. Copy the token from `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
+
+**Option B — Anthropic API key**
+
+If you have an [Anthropic API key](https://console.anthropic.com/settings/keys), set `ANTHROPIC_API_KEY` instead of `CLAUDE_CODE_OAUTH_TOKEN`.
+
+**Add the secret to your repo:**
+
 Go to **Settings > Secrets and variables > Actions** and add:
 
 | Secret | Description |
 |--------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Your Claude Code OAuth token |
+| `CLAUDE_CODE_OAUTH_TOKEN` | `accessToken` from `~/.claude/.credentials.json` after `claude login` |
+
+Or via GitHub CLI:
+```bash
+# Paste the token value when prompted
+gh secret set CLAUDE_CODE_OAUTH_TOKEN
+
+# Or pipe it directly
+cat ~/.claude/.credentials.json | python3 -c "import sys,json; print(json.load(sys.stdin)['claudeAiOauth']['accessToken'])" | gh secret set CLAUDE_CODE_OAUTH_TOKEN
+```
 
 That's the only secret you need. The agent Docker image is public and requires no authentication to pull.
 
